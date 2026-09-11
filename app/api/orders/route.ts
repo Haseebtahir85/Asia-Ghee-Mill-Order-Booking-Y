@@ -1,83 +1,99 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase";
 import { NewOrderInput } from "@/lib/types";
+import { parseUnitWeightKg, DEFAULT_OIL_DENSITY_KG_PER_LITER } from "@/lib/weightParser";
 
-// GET /api/orders?status=pending&from=2026-09-01&to=2026-09-30&q=customer
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const status = searchParams.get("status");
-  const from = searchParams.get("from");
-  const to = searchParams.get("to");
-  const q = searchParams.get("q");
-
-  let query = supabaseServer
-    .from("orders")
-    .select("*")
-    .order("order_date", { ascending: false })
-    .order("created_at", { ascending: false });
-
-  if (status) query = query.eq("status", status);
-  if (from) query = query.gte("order_date", from);
-  if (to) query = query.lte("order_date", to);
-  if (q) {
-    query = query.or(
-      `customer_name.ilike.%${q}%,order_number.ilike.%${q}%,origin.ilike.%${q}%,destination.ilike.%${q}%`
-    );
-  }
-
-  const { data, error } = await query;
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ orders: data });
-}
-
-// POST /api/orders  — create a new order
+// POST /api/orders — public endpoint the /book page submits to.
+// Rates, types, and weights are always recomputed server-side from
+// the current item catalog — the client only sends item_id + qty,
+// so a tampered request can't book at a fake price.
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as NewOrderInput;
 
-  if (
-    !body.customer_name ||
-    !body.origin ||
-    !body.destination ||
-    body.weight_kg === undefined ||
-    body.rate_per_kg === undefined
-  ) {
+  if (!body.customer_name || !Array.isArray(body.lines) || body.lines.length === 0) {
     return NextResponse.json(
-      { error: "customer_name, origin, destination, weight_kg, rate_per_kg are required" },
+      { error: "customer_name and at least one order line are required" },
       { status: 400 }
     );
   }
 
-  if (body.weight_kg <= 0) {
-    return NextResponse.json({ error: "weight_kg must be greater than 0" }, { status: 400 });
-  }
-  if (body.rate_per_kg < 0) {
-    return NextResponse.json({ error: "rate_per_kg cannot be negative" }, { status: 400 });
+  const qtyLines = body.lines.filter((l) => l.qty && l.qty > 0);
+  if (qtyLines.length === 0) {
+    return NextResponse.json({ error: "Enter a quantity for at least one item" }, { status: 400 });
   }
 
-  const { data, error } = await supabaseServer
+  const itemIds = qtyLines.map((l) => l.item_id);
+  const { data: items, error: itemsError } = await supabaseServer
+    .from("items")
+    .select("id, name, rate, type")
+    .in("id", itemIds);
+
+  if (itemsError) {
+    return NextResponse.json({ error: itemsError.message }, { status: 500 });
+  }
+  if (!items || items.length !== itemIds.length) {
+    return NextResponse.json({ error: "One or more items no longer exist" }, { status: 400 });
+  }
+
+  const { data: densitySetting } = await supabaseServer
+    .from("settings")
+    .select("value")
+    .eq("key", "oil_density_kg_per_liter")
+    .maybeSingle();
+  const oilDensity = densitySetting ? parseFloat(densitySetting.value) : DEFAULT_OIL_DENSITY_KG_PER_LITER;
+
+  const itemById = new Map(items.map((i) => [i.id, i]));
+
+  let totalAmount = 0;
+  let totalWeightGheeKg = 0;
+  let totalWeightOilKg = 0;
+
+  const orderItemsToInsert = qtyLines.map((line) => {
+    const item = itemById.get(line.item_id)!;
+    const unitWeightKg = parseUnitWeightKg(item.name, oilDensity);
+    const lineWeightKg = unitWeightKg * line.qty;
+    const lineAmount = Math.round(item.rate * line.qty * 100) / 100;
+
+    totalAmount += lineAmount;
+    if (item.type === "ghee") totalWeightGheeKg += lineWeightKg;
+    if (item.type === "oil") totalWeightOilKg += lineWeightKg;
+
+    return {
+      item_id: item.id,
+      item_name: item.name,
+      item_type: item.type,
+      rate: item.rate,
+      qty: line.qty,
+      weight_kg: Math.round(lineWeightKg * 1000) / 1000,
+    };
+  });
+
+  const { data: order, error: orderError } = await supabaseServer
     .from("orders")
     .insert({
       customer_name: body.customer_name,
       customer_contact: body.customer_contact ?? null,
-      origin: body.origin,
-      destination: body.destination,
-      weight_kg: body.weight_kg,
-      rate_per_kg: body.rate_per_kg,
-      extra_charges: body.extra_charges ?? 0,
-      status: body.status ?? "pending",
-      order_date: body.order_date ?? new Date().toISOString().slice(0, 10),
       notes: body.notes ?? null,
+      total_amount: Math.round(totalAmount * 100) / 100,
+      total_weight_ghee_kg: Math.round(totalWeightGheeKg * 1000) / 1000,
+      total_weight_oil_kg: Math.round(totalWeightOilKg * 1000) / 1000,
     })
     .select()
     .single();
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (orderError) {
+    return NextResponse.json({ error: orderError.message }, { status: 500 });
   }
 
-  return NextResponse.json({ order: data }, { status: 201 });
+  const { error: lineError } = await supabaseServer
+    .from("order_items")
+    .insert(orderItemsToInsert.map((line) => ({ ...line, order_id: order.id })));
+
+  if (lineError) {
+    // roll back the order header so we don't leave an empty order behind
+    await supabaseServer.from("orders").delete().eq("id", order.id);
+    return NextResponse.json({ error: lineError.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ order }, { status: 201 });
 }

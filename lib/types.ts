@@ -1,50 +1,56 @@
-export type OrderStatus =
-  | "pending"
-  | "confirmed"
-  | "dispatched"
-  | "delivered"
-  | "cancelled";
+export type ItemType = "ghee" | "oil" | "other";
+export type OrderStatus = "pending" | "confirmed" | "dispatched" | "delivered" | "cancelled";
+
+export interface Item {
+  id: string;
+  name: string;
+  rate: number;
+  type: ItemType;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrderItem {
+  id: string;
+  order_id: string;
+  item_id: string | null;
+  item_name: string;
+  item_type: ItemType;
+  rate: number;
+  qty: number;
+  amount: number;
+  weight_kg: number;
+  created_at: string;
+}
 
 export interface Order {
   id: string;
   order_number: string;
   customer_name: string;
   customer_contact: string | null;
-  origin: string;
-  destination: string;
-  weight_kg: number;
-  rate_per_kg: number;
-  extra_charges: number;
-  total_amount: number;
   status: OrderStatus;
-  order_date: string; // ISO date
+  order_date: string;
   notes: string | null;
+  total_amount: number;
+  total_weight_ghee_kg: number;
+  total_weight_oil_kg: number;
   created_at: string;
   updated_at: string;
 }
 
-export interface RateCard {
-  id: string;
-  origin: string;
-  destination: string;
-  min_weight_kg: number;
-  max_weight_kg: number | null;
-  rate_per_kg: number;
-  effective_from: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
+export interface OrderWithItems extends Order {
+  order_items: OrderItem[];
 }
 
+// What the public /book page submits
 export interface NewOrderInput {
   customer_name: string;
   customer_contact?: string;
-  origin: string;
-  destination: string;
-  weight_kg: number;
-  rate_per_kg: number;
-  extra_charges?: number;
-  status?: OrderStatus;
-  order_date?: string;
   notes?: string;
+  lines: {
+    item_id: string;
+    qty: number;
+  }[];
 }
