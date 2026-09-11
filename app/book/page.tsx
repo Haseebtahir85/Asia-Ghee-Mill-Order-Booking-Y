@@ -14,10 +14,17 @@ export default function BookPage() {
   const [error, setError] = useState<string | null>(null);
   const [confirmedOrderNumber, setConfirmedOrderNumber] = useState<string | null>(null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   useEffect(() => {
     fetch("/api/items")
-      .then((r) => r.json())
+      .then(async (r) => {
+        const json = await r.json();
+        if (!r.ok) throw new Error(json.error || `Request failed (${r.status})`);
+        return json;
+      })
       .then((json) => setItems(json.items ?? []))
+      .catch((err) => setLoadError(err.message || "Failed to load items"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -129,6 +136,15 @@ export default function BookPage() {
 
         {loading ? (
           <p>Loading items...</p>
+        ) : loadError ? (
+          <p style={{ color: "#b00020" }}>
+            Couldn&apos;t load the item list: {loadError}. Try refreshing — if this keeps happening, the
+            item catalog may not be set up yet.
+          </p>
+        ) : items.length === 0 ? (
+          <p style={{ color: "#b00020" }}>
+            No items found in the catalog. Add items in the admin panel before orders can be booked.
+          </p>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
             <thead>
@@ -171,7 +187,7 @@ export default function BookPage() {
 
         {error && <div style={{ color: "#b00020", marginBottom: 12 }}>{error}</div>}
 
-        <button type="submit" disabled={submitting || loading} style={buttonStyle}>
+        <button type="submit" disabled={submitting || loading || !!loadError || items.length === 0} style={buttonStyle}>
           {submitting ? "Booking..." : "Book Order"}
         </button>
       </form>
