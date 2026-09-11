@@ -44,6 +44,21 @@ create index if not exists idx_items_sort on items (sort_order);
 create index if not exists idx_items_active on items (is_active);
 
 -- ------------------------------------------------------------
+-- Towns — admin-managed dropdown list shown on the booking page.
+-- ------------------------------------------------------------
+create table if not exists towns (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  sort_order integer not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_towns_sort on towns (sort_order);
+create index if not exists idx_towns_active on towns (is_active);
+
+-- ------------------------------------------------------------
 -- Orders — one row per submitted booking (from the public /book
 -- link). Totals are computed application-side at submit time and
 -- stored so historical orders don't shift if rates/items change
@@ -56,7 +71,8 @@ create table if not exists orders (
   order_number text not null unique
     default ('ORD-' || lpad(nextval('order_number_seq')::text, 5, '0')),
   customer_name text not null,
-  customer_contact text,
+  town_id uuid references towns (id) on delete set null,
+  town text,
   status text not null default 'pending'
     check (status in ('pending', 'confirmed', 'dispatched', 'delivered', 'cancelled')),
   order_date date not null default current_date,
@@ -116,6 +132,11 @@ create trigger trg_orders_updated_at
   before update on orders
   for each row execute function set_updated_at();
 
+drop trigger if exists trg_towns_updated_at on towns;
+create trigger trg_towns_updated_at
+  before update on towns
+  for each row execute function set_updated_at();
+
 -- ------------------------------------------------------------
 -- RLS — locked down by default. The app talks to Supabase only
 -- from server-side API routes using the service role key, which
@@ -125,6 +146,7 @@ alter table items enable row level security;
 alter table orders enable row level security;
 alter table order_items enable row level security;
 alter table settings enable row level security;
+alter table towns enable row level security;
 
 -- ------------------------------------------------------------
 -- Seed data — the current item catalog (name, weight per unit
@@ -162,3 +184,14 @@ insert into items (name, weight_kg, rate, type, sort_order) values
   ('RSO 1000 ml',      5.46,  3100, 'oil', 290),
   ('Soap Carton',      10,    2700, 'other', 300)
 on conflict do nothing;
+
+-- ------------------------------------------------------------
+-- Seed towns — edit any time from /admin/towns
+-- ------------------------------------------------------------
+insert into towns (name, sort_order) values
+  ('Bahawalpur', 10),
+  ('Multan', 20),
+  ('Lahore', 30),
+  ('Karachi', 40),
+  ('Rahim Yar Khan', 50)
+on conflict (name) do nothing;

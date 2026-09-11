@@ -13,6 +13,15 @@ export interface Item {
   updated_at: string;
 }
 
+export interface Town {
+  id: string;
+  name: string;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface OrderItem {
   id: string;
   order_id: string;
@@ -31,7 +40,8 @@ export interface Order {
   id: string;
   order_number: string;
   customer_name: string;
-  customer_contact: string | null;
+  town_id: string | null;
+  town: string | null; // snapshot of the town name at order time
   status: OrderStatus;
   order_date: string;
   notes: string | null;
@@ -48,7 +58,7 @@ export interface OrderWithItems extends Order {
 // What the public /book page submits
 export interface NewOrderInput {
   customer_name: string;
-  customer_contact?: string;
+  town_id: string;
   notes?: string;
   lines: {
     item_id: string;

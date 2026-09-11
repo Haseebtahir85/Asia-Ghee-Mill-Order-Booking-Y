@@ -21,7 +21,7 @@ export default function AdminOrderDetailPage({ params }: { params: { id: string 
     <main style={{ maxWidth: 800, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 4 }}>{order.order_number}</h1>
       <p style={{ color: "#555", marginBottom: 20 }}>
-        {order.customer_name} {order.customer_contact ? `· ${order.customer_contact}` : ""} · {order.order_date} · {order.status}
+        {order.customer_name} {order.town ? `· ${order.town}` : ""} · {order.order_date} · {order.status}
       </p>
 
       <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>

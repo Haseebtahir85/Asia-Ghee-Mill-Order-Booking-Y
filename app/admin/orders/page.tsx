@@ -112,6 +112,7 @@ export default function AdminOrdersPage() {
               <th style={thStyle}>Order #</th>
               <th style={thStyle}>Date</th>
               <th style={thStyle}>Customer</th>
+              <th style={thStyle}>Town</th>
               <th style={thStyle}>Amount</th>
               <th style={thStyle}>Weight (kg)</th>
               <th style={thStyle}>Status</th>
@@ -124,6 +125,7 @@ export default function AdminOrdersPage() {
                 <td style={tdStyle}><Link href={`/admin/orders/${o.id}`}>{o.order_number}</Link></td>
                 <td style={tdStyle}>{o.order_date}</td>
                 <td style={tdStyle}>{o.customer_name}</td>
+                <td style={tdStyle}>{o.town ?? ""}</td>
                 <td style={tdStyle}>{o.total_amount.toLocaleString()}</td>
                 <td style={tdStyle}>{o.total_weight_kg.toFixed(2)}</td>
                 <td style={tdStyle}>

@@ -20,7 +20,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <nav style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 24px", borderBottom: "1px solid #ddd", fontFamily: "system-ui, sans-serif" }}>
         <div style={{ display: "flex", gap: 16 }}>
           <a href="/admin/items">Items & Rates</a>
+          <a href="/admin/towns">Towns</a>
           <a href="/admin/orders">Orders</a>
+          <a href="/book" style={{ color: "#888" }}>← Booking page</a>
         </div>
         <button onClick={logout} style={{ border: "none", background: "none", cursor: "pointer", color: "#555" }}>
           Log out

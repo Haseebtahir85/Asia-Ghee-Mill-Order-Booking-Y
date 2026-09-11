@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     "Order #": o.order_number,
     "Date": o.order_date,
     "Customer": o.customer_name,
-    "Contact": o.customer_contact ?? "",
+    "Town": o.town ?? "",
     "Status": o.status,
     "Amount": o.total_amount,
     "Weight (kg)": round(o.total_weight_kg),

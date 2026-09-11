@@ -3,15 +3,16 @@ import { supabaseServer } from "@/lib/supabase";
 import { NewOrderInput } from "@/lib/types";
 
 // POST /api/orders — public endpoint the /book page submits to.
-// Rate, weight, and type are always re-fetched from the current
-// item catalog server-side — the client only sends item_id + qty,
-// so a tampered request can't book at a fake price or weight.
+// Rate, weight, type, and town name are always re-fetched from the
+// current catalog/town list server-side — the client only sends
+// item_id + qty and a town_id, so a tampered request can't book at
+// a fake price/weight or an invalid town.
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as NewOrderInput;
 
-  if (!body.customer_name || !Array.isArray(body.lines) || body.lines.length === 0) {
+  if (!body.customer_name || !body.town_id || !Array.isArray(body.lines) || body.lines.length === 0) {
     return NextResponse.json(
-      { error: "customer_name and at least one order line are required" },
+      { error: "customer_name, town, and at least one order line are required" },
       { status: 400 }
     );
   }
@@ -19,6 +20,19 @@ export async function POST(req: NextRequest) {
   const qtyLines = body.lines.filter((l) => l.qty && l.qty > 0);
   if (qtyLines.length === 0) {
     return NextResponse.json({ error: "Enter a quantity for at least one item" }, { status: 400 });
+  }
+
+  const { data: town, error: townError } = await supabaseServer
+    .from("towns")
+    .select("id, name")
+    .eq("id", body.town_id)
+    .maybeSingle();
+
+  if (townError) {
+    return NextResponse.json({ error: townError.message }, { status: 500 });
+  }
+  if (!town) {
+    return NextResponse.json({ error: "Selected town is invalid" }, { status: 400 });
   }
 
   const itemIds = qtyLines.map((l) => l.item_id);
@@ -62,7 +76,8 @@ export async function POST(req: NextRequest) {
     .from("orders")
     .insert({
       customer_name: body.customer_name,
-      customer_contact: body.customer_contact ?? null,
+      town_id: town.id,
+      town: town.name,
       notes: body.notes ?? null,
       total_amount: Math.round(totalAmount * 100) / 100,
       total_weight_kg: Math.round(totalWeightKg * 1000) / 1000,
