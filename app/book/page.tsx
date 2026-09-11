@@ -9,7 +9,6 @@ export default function BookPage() {
   const [loading, setLoading] = useState(true);
   const [customerName, setCustomerName] = useState("");
   const [customerContact, setCustomerContact] = useState("");
-  const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmedOrderNumber, setConfirmedOrderNumber] = useState<string | null>(null);
@@ -76,7 +75,6 @@ export default function BookPage() {
       body: JSON.stringify({
         customer_name: customerName,
         customer_contact: customerContact || undefined,
-        notes: notes || undefined,
         lines,
       }),
     });
@@ -106,7 +104,6 @@ export default function BookPage() {
               setQtys({});
               setCustomerName("");
               setCustomerContact("");
-              setNotes("");
             }}
             style={{ ...buttonStyle, marginTop: 20 }}
           >
@@ -122,15 +119,12 @@ export default function BookPage() {
       <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 16 }}>Order Booking</h1>
 
       <form onSubmit={submitOrder}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 16 }}>
           <Field label="Customer Name">
             <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
           </Field>
           <Field label="Contact">
             <input value={customerContact} onChange={(e) => setCustomerContact(e.target.value)} />
-          </Field>
-          <Field label="Notes">
-            <input value={notes} onChange={(e) => setNotes(e.target.value)} />
           </Field>
         </div>
 
@@ -146,7 +140,8 @@ export default function BookPage() {
             No items found in the catalog. Add items in the admin panel before orders can be booked.
           </p>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
+          <div style={{ overflowX: "auto", marginBottom: 16 }}>
+          <table style={{ width: "100%", minWidth: 480, borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "#eee", textAlign: "left" }}>
                 <th style={thStyle}>Item</th>
@@ -183,6 +178,7 @@ export default function BookPage() {
               </tr>
             </tfoot>
           </table>
+          </div>
         )}
 
         {error && <div style={{ color: "#b00020", marginBottom: 12 }}>{error}</div>}
