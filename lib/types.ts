@@ -16,6 +16,8 @@ export interface Item {
 export interface Town {
   id: string;
   name: string;
+  group_no: number | null;
+  upc: string | null;
   sort_order: number;
   is_active: boolean;
   created_at: string;
