@@ -155,7 +155,7 @@ export default function BookPage() {
               <select className={styles.select} value={townId} onChange={(e) => setTownId(e.target.value)}>
                 <option value="">Select town...</option>
                 {towns.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
+                  <option key={t.id} value={t.id}>{t.name}{t.upc ? ` (${t.upc})` : ""}</option>
                 ))}
               </select>
             </div>
@@ -177,6 +177,7 @@ export default function BookPage() {
             No items found in the catalog. Add items in the admin panel before orders can be booked.
           </div>
         ) : (
+          <div className={styles.tableOuter}>
           <div className={styles.tableWrap}>
             <table className={styles.table}>
               <thead>
@@ -222,6 +223,7 @@ export default function BookPage() {
                 </tr>
               </tfoot>
             </table>
+          </div>
           </div>
         )}
 

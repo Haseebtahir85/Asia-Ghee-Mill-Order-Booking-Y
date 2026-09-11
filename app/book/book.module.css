@@ -185,17 +185,21 @@
 }
 
 /* ---------- Item table ---------- */
-.tableWrap {
-  overflow-x: auto;
+.tableOuter {
   border-radius: 14px;
+  overflow: hidden;
   box-shadow: 0 4px 18px rgba(11, 43, 91, 0.08);
   margin-bottom: 20px;
   animation: fadeUp 0.4s ease both;
   animation-delay: 0.16s;
 }
 
+.tableWrap {
+  overflow-x: auto;
+}
+
 .table {
-  width: 80%;
+  width: 100%;
   min-width: 540px;
   border-collapse: separate;
   border-spacing: 0;
@@ -207,7 +211,7 @@
 }
 
 .table th {
-  padding: 8px 12px;
+  padding: 6px 10px;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -230,9 +234,9 @@
 }
 
 .table td {
-  padding: 5px 12px;
-  font-size: 13px;
-  line-height: 1.3;
+  padding: 3px 10px;
+  font-size: 12.5px;
+  line-height: 1.25;
   border-bottom: 1px solid #eef0f4;
   vertical-align: middle;
 }
@@ -240,7 +244,7 @@
 .itemCell {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .itemIcon {
@@ -249,17 +253,17 @@
 }
 
 .itemIcon svg {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
 }
 
 .qtyInput {
-  width: 56px;
+  width: 48px;
   text-align: right;
-  padding: 4px 6px;
-  font-size: 13px;
+  padding: 3px 5px;
+  font-size: 12.5px;
   border: 1.5px solid #e2e5ea;
-  border-radius: 7px;
+  border-radius: 6px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
