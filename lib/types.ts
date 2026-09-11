@@ -4,7 +4,8 @@ export type OrderStatus = "pending" | "confirmed" | "dispatched" | "delivered" |
 export interface Item {
   id: string;
   name: string;
-  rate: number;
+  weight_kg: number; // per unit sold
+  rate: number; // per unit sold
   type: ItemType;
   sort_order: number;
   is_active: boolean;
@@ -18,10 +19,11 @@ export interface OrderItem {
   item_id: string | null;
   item_name: string;
   item_type: ItemType;
-  rate: number;
+  rate: number; // per unit, snapshot at order time
+  weight_kg: number; // per unit, snapshot at order time
   qty: number;
-  amount: number;
-  weight_kg: number;
+  amount: number; // generated: qty * rate
+  weight_total_kg: number; // generated: qty * weight_kg
   created_at: string;
 }
 
@@ -34,8 +36,7 @@ export interface Order {
   order_date: string;
   notes: string | null;
   total_amount: number;
-  total_weight_ghee_kg: number;
-  total_weight_oil_kg: number;
+  total_weight_kg: number;
   created_at: string;
   updated_at: string;
 }

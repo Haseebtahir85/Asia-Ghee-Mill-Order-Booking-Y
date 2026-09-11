@@ -19,8 +19,11 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const body = await req.json();
 
-  if (!body.name || body.rate === undefined || !body.type) {
-    return NextResponse.json({ error: "name, rate, type are required" }, { status: 400 });
+  if (!body.name || body.rate === undefined || body.weight_kg === undefined || !body.type) {
+    return NextResponse.json(
+      { error: "name, weight_kg, rate, type are required" },
+      { status: 400 }
+    );
   }
   if (!["ghee", "oil", "other"].includes(body.type)) {
     return NextResponse.json({ error: "type must be ghee, oil, or other" }, { status: 400 });
@@ -42,6 +45,7 @@ export async function POST(req: NextRequest) {
     .from("items")
     .insert({
       name: body.name,
+      weight_kg: body.weight_kg,
       rate: body.rate,
       type: body.type,
       sort_order: sortOrder,

@@ -113,8 +113,7 @@ export default function AdminOrdersPage() {
               <th style={thStyle}>Date</th>
               <th style={thStyle}>Customer</th>
               <th style={thStyle}>Amount</th>
-              <th style={thStyle}>Weight-Ghee</th>
-              <th style={thStyle}>Weight-Oil</th>
+              <th style={thStyle}>Weight (kg)</th>
               <th style={thStyle}>Status</th>
             </tr>
           </thead>
@@ -126,8 +125,7 @@ export default function AdminOrdersPage() {
                 <td style={tdStyle}>{o.order_date}</td>
                 <td style={tdStyle}>{o.customer_name}</td>
                 <td style={tdStyle}>{o.total_amount.toLocaleString()}</td>
-                <td style={tdStyle}>{(o.total_weight_ghee_kg / 1000).toFixed(2)} t</td>
-                <td style={tdStyle}>{(o.total_weight_oil_kg / 1000).toFixed(2)} t</td>
+                <td style={tdStyle}>{o.total_weight_kg.toFixed(2)}</td>
                 <td style={tdStyle}>
                   <select value={o.status} onChange={(e) => updateStatus(o.id, e.target.value as OrderStatus)}>
                     {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}

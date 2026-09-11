@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase";
 import { NewOrderInput } from "@/lib/types";
-import { parseUnitWeightKg, DEFAULT_OIL_DENSITY_KG_PER_LITER } from "@/lib/weightParser";
 
 // POST /api/orders — public endpoint the /book page submits to.
-// Rates, types, and weights are always recomputed server-side from
-// the current item catalog — the client only sends item_id + qty,
-// so a tampered request can't book at a fake price.
+// Rate, weight, and type are always re-fetched from the current
+// item catalog server-side — the client only sends item_id + qty,
+// so a tampered request can't book at a fake price or weight.
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as NewOrderInput;
 
@@ -25,7 +24,7 @@ export async function POST(req: NextRequest) {
   const itemIds = qtyLines.map((l) => l.item_id);
   const { data: items, error: itemsError } = await supabaseServer
     .from("items")
-    .select("id, name, rate, type")
+    .select("id, name, weight_kg, rate, type")
     .in("id", itemIds);
 
   if (itemsError) {
@@ -35,36 +34,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "One or more items no longer exist" }, { status: 400 });
   }
 
-  const { data: densitySetting } = await supabaseServer
-    .from("settings")
-    .select("value")
-    .eq("key", "oil_density_kg_per_liter")
-    .maybeSingle();
-  const oilDensity = densitySetting ? parseFloat(densitySetting.value) : DEFAULT_OIL_DENSITY_KG_PER_LITER;
-
   const itemById = new Map(items.map((i) => [i.id, i]));
 
   let totalAmount = 0;
-  let totalWeightGheeKg = 0;
-  let totalWeightOilKg = 0;
+  let totalWeightKg = 0;
 
+  // rate and weight_kg stored per line are PER UNIT (a snapshot of
+  // the catalog item at order time) — amount and weight_total_kg
+  // are computed by the database as generated columns (qty * rate,
+  // qty * weight_kg), so we never multiply by qty twice here.
   const orderItemsToInsert = qtyLines.map((line) => {
     const item = itemById.get(line.item_id)!;
-    const unitWeightKg = parseUnitWeightKg(item.name, oilDensity);
-    const lineWeightKg = unitWeightKg * line.qty;
-    const lineAmount = Math.round(item.rate * line.qty * 100) / 100;
-
-    totalAmount += lineAmount;
-    if (item.type === "ghee") totalWeightGheeKg += lineWeightKg;
-    if (item.type === "oil") totalWeightOilKg += lineWeightKg;
+    totalAmount += Math.round(item.rate * line.qty * 100) / 100;
+    totalWeightKg += item.weight_kg * line.qty;
 
     return {
       item_id: item.id,
       item_name: item.name,
       item_type: item.type,
       rate: item.rate,
+      weight_kg: item.weight_kg,
       qty: line.qty,
-      weight_kg: Math.round(lineWeightKg * 1000) / 1000,
     };
   });
 
@@ -75,8 +65,7 @@ export async function POST(req: NextRequest) {
       customer_contact: body.customer_contact ?? null,
       notes: body.notes ?? null,
       total_amount: Math.round(totalAmount * 100) / 100,
-      total_weight_ghee_kg: Math.round(totalWeightGheeKg * 1000) / 1000,
-      total_weight_oil_kg: Math.round(totalWeightOilKg * 1000) / 1000,
+      total_weight_kg: Math.round(totalWeightKg * 1000) / 1000,
     })
     .select()
     .single();

@@ -52,18 +52,17 @@ export async function POST(req: NextRequest) {
     "Contact": o.customer_contact ?? "",
     "Status": o.status,
     "Amount": o.total_amount,
-    "Weight-Ghee (Ton)": round(o.total_weight_ghee_kg / 1000),
-    "Weight-Oil (Ton)": round(o.total_weight_oil_kg / 1000),
+    "Weight (kg)": round(o.total_weight_kg),
     "Notes": o.notes ?? "",
   }));
   const ordersSheet = XLSX.utils.json_to_sheet(ordersRows);
   ordersSheet["!cols"] = [
     { wch: 12 }, { wch: 12 }, { wch: 22 }, { wch: 15 }, { wch: 12 },
-    { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 30 },
+    { wch: 14 }, { wch: 14 }, { wch: 30 },
   ];
   XLSX.utils.book_append_sheet(workbook, ordersSheet, "Orders");
 
-  // ---- Sheet 2: Item Totals (same shape as the reference rate sheet) ----
+  // ---- Sheet 2: Item Totals (aggregated across the selected orders) ----
   const items = (lineItems as OrderItem[]) ?? [];
   const totalsByItem = new Map<
     string,
@@ -76,14 +75,14 @@ export async function POST(req: NextRequest) {
     if (existing) {
       existing.qty += Number(li.qty);
       existing.amount += Number(li.amount);
-      existing.weightKg += Number(li.weight_kg) * Number(li.qty);
+      existing.weightKg += Number(li.weight_total_kg);
     } else {
       totalsByItem.set(key, {
         qty: Number(li.qty),
         rate: Number(li.rate),
         amount: Number(li.amount),
         type: li.item_type,
-        weightKg: Number(li.weight_kg) * Number(li.qty),
+        weightKg: Number(li.weight_total_kg),
       });
     }
   }
@@ -93,22 +92,21 @@ export async function POST(req: NextRequest) {
     "Qty": t.qty,
     "Rate": t.rate,
     "Amount": round(t.amount),
+    "Weight (kg)": round(t.weightKg),
     "Type": t.type,
   }));
   const itemsSheet = XLSX.utils.json_to_sheet(itemRows);
-  itemsSheet["!cols"] = [{ wch: 22 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 10 }];
+  itemsSheet["!cols"] = [{ wch: 22 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 10 }];
 
-  // Append the same footer totals shown in the reference sheet
   const totalAmount = orders.reduce((s, o) => s + Number(o.total_amount), 0);
-  const totalGheeTon = orders.reduce((s, o) => s + Number(o.total_weight_ghee_kg), 0) / 1000;
-  const totalOilTon = orders.reduce((s, o) => s + Number(o.total_weight_oil_kg), 0) / 1000;
+  const totalWeightKg = orders.reduce((s, o) => s + Number(o.total_weight_kg), 0);
   XLSX.utils.sheet_add_aoa(
     itemsSheet,
     [
       [],
-      ["", "", "Weight-Ghee (Ton)", round(totalGheeTon)],
-      ["", "", "Weight-Oil (Ton)", round(totalOilTon)],
-      ["", "", "Total Amount", round(totalAmount)],
+      ["", "", "", "Total Amount", round(totalAmount)],
+      ["", "", "", "Total Weight (kg)", round(totalWeightKg)],
+      ["", "", "", "Total Weight (Ton)", round(totalWeightKg / 1000)],
     ],
     { origin: -1 }
   );
@@ -127,7 +125,7 @@ export async function POST(req: NextRequest) {
       "Qty": li.qty,
       "Rate": li.rate,
       "Amount": li.amount,
-      "Weight (kg)": round(Number(li.weight_kg) * Number(li.qty)),
+      "Weight (kg)": round(Number(li.weight_total_kg)),
     };
   });
   const detailSheet = XLSX.utils.json_to_sheet(detailRows);

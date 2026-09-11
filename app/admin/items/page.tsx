@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Item, ItemType } from "@/lib/types";
 
-const emptyForm = { name: "", rate: "", type: "ghee" as ItemType };
+const emptyForm = { name: "", weight_kg: "", rate: "", type: "ghee" as ItemType };
 
 export default function AdminItemsPage() {
   const [items, setItems] = useState<Item[]>([]);
@@ -27,15 +27,20 @@ export default function AdminItemsPage() {
     e.preventDefault();
     setError(null);
 
-    if (!form.name || !form.rate) {
-      setError("Name and rate are required.");
+    if (!form.name || !form.rate || !form.weight_kg) {
+      setError("Name, weight, and rate are required.");
       return;
     }
 
     const res = await fetch("/api/admin/items", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: form.name, rate: parseFloat(form.rate), type: form.type }),
+      body: JSON.stringify({
+        name: form.name,
+        weight_kg: parseFloat(form.weight_kg),
+        rate: parseFloat(form.rate),
+        type: form.type,
+      }),
     });
 
     if (!res.ok) {
@@ -77,11 +82,12 @@ export default function AdminItemsPage() {
   }
 
   return (
-    <main style={{ maxWidth: 900, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 16 }}>Items & Rates</h1>
+    <main style={{ maxWidth: 950, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
+      <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 16 }}>Items, Weights & Rates</h1>
 
-      <form onSubmit={addItem} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 10, marginBottom: 24, padding: 14, border: "1px solid #ddd", borderRadius: 8 }}>
+      <form onSubmit={addItem} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr auto", gap: 10, marginBottom: 24, padding: 14, border: "1px solid #ddd", borderRadius: 8 }}>
         <input placeholder="Item name (e.g. 1 Kg 12 Pack)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        <input type="number" step="0.01" placeholder="Weight (kg)" value={form.weight_kg} onChange={(e) => setForm({ ...form, weight_kg: e.target.value })} />
         <input type="number" step="0.01" placeholder="Rate" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} />
         <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as ItemType })}>
           <option value="ghee">Ghee</option>
@@ -101,6 +107,7 @@ export default function AdminItemsPage() {
             <tr style={{ textAlign: "left", borderBottom: "2px solid #ddd" }}>
               <th style={thStyle}></th>
               <th style={thStyle}>Item</th>
+              <th style={thStyle}>Weight (kg)</th>
               <th style={thStyle}>Rate</th>
               <th style={thStyle}>Type</th>
               <th style={thStyle}>Active</th>
@@ -119,6 +126,15 @@ export default function AdminItemsPage() {
                     defaultValue={item.name}
                     onBlur={(e) => e.target.value !== item.name && updateItem(item.id, { name: e.target.value })}
                     style={{ width: "100%", border: "1px solid transparent", padding: 4 }}
+                  />
+                </td>
+                <td style={tdStyle}>
+                  <input
+                    type="number"
+                    step="0.01"
+                    defaultValue={item.weight_kg}
+                    onBlur={(e) => parseFloat(e.target.value) !== item.weight_kg && updateItem(item.id, { weight_kg: parseFloat(e.target.value) })}
+                    style={{ width: 80, border: "1px solid transparent", padding: 4 }}
                   />
                 </td>
                 <td style={tdStyle}>

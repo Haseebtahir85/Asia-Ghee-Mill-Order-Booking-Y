@@ -1,59 +1,48 @@
 # Order Booking System (Ghee/Oil)
 
-Two separate pieces, as requested:
+Two separate pieces:
 
-1. **`/book`** — a public, no-login order booking page. Share this URL with customers/staff who need to place orders. It shows the item table (Item / Qty / Rate / Amount / Type), computes Amount and the Weight-Ghee / Weight-Oil ton totals live as quantities are typed, and submits the order.
-2. **`/admin`** — a separate, password-protected area where rates, items, and all settings live. Nothing on the `/book` page can change a rate or the item list — that only happens here.
+1. **`/book`** — a public, no-login order booking page (share this URL). Shows Item / Qty / Amount / Weight — only Qty is editable, everything else is computed and read-only. Rate is used internally to compute Amount but is never displayed.
+2. **`/admin`** — a separate, password-protected area where item names, weights, and rates live. Nothing on `/book` can change them.
 
-## How the weight (Ghee/Oil tons) is calculated
+## Weight and rate (v2)
 
-Per-unit weight is **parsed directly from the item name** — nothing is stored separately, so renaming an item's pack size in the admin automatically updates its weight everywhere:
+Each item's **weight (kg per unit)** and **rate (per unit)** are stored directly on the item — entered by the admin, not derived or parsed from the item's name. Change either any time in `/admin/items`; every future order picks up the new value immediately (past orders keep their original snapshot).
 
-- `"16 Kg tin"`, `"16 Kg Bucket"`, `"2.5 Kg Bucket"` → weight = the Kg number itself
-- `"1 Kg 12 Pack"`, `"1/2 Kg 24 Pack"` → weight = Kg-per-unit × pack count (both come out to 12kg here)
-- `"16 Ltr.s. tin"`, `"1 Ltr. 12 Pack"`, `"1 Ltr.6 Pack B"` → volume in liters × oil density → kg
-- `"RSO 250 ml"` → 0.25L × oil density → kg
-- Anything that doesn't match one of these patterns (e.g. `"Soap Carton"`) → 0 weight, still counted in Amount
+- Amount (per line) = Qty × Rate
+- Weight (per line) = Qty × Weight
+- The `/book` page footer shows **Total Amount** and **Total Weight** (combined, in kg) across all lines.
 
-The oil density (default **0.91 kg/L**) lives in the `settings` table and is editable at `PATCH /api/admin/settings`. I validated the parser against your rate sheet — it reproduces **Weight-Ghee 9.24 ton** and **Weight-Oil 0.77 ton** exactly from the same quantities.
+`type` (ghee/oil/other) is still stored per item for your own bookkeeping/reporting, but it's not shown on the booking page and doesn't affect the weight calculation.
 
-The parser is in `lib/weightParser.ts` and is used both by the `/book` page (live preview) and the order-creation API route (final stored totals) — so what the customer sees matches what gets saved.
+## Setting up the database
 
-Amount = Qty × Rate (rate is per unit sold — per tin/pack/bucket — not per kg), also confirmed with you.
+- **Fresh Supabase project:** run `supabase/schema.sql`.
+- **Already ran the old (v1) schema.sql on a live project:** run `supabase/migration_v2_explicit_weights.sql` instead — it adds the new `weight_kg` columns, replaces the item catalog with the current name/weight/rate list, and fixes a bug in the old version where the weight total was being multiplied by quantity twice. It does **not** touch your existing `orders` rows, only `items` (whose rows are safely replaced — any past `order_items` keep their own snapshot regardless).
 
-## Admin protection
-
-`/admin/*` and `/api/admin/*` are gated by `middleware.ts` behind a single shared password (`ADMIN_PASSWORD`) and a signed session cookie (`ADMIN_SESSION_SECRET`, 12-hour expiry). This is intentionally simple — good enough to keep the rate sheet from being wide open, but if multiple staff need distinct logins later, swap this for Supabase Auth.
-
-The `/book` page and its two read endpoint (`/api/items`, `/api/settings`) are intentionally public with no auth, since it's meant to be "just a link."
-
-## Setup
-
-1. Create a Supabase project.
-2. Run `supabase/schema.sql` in the Supabase SQL editor. It creates `items`, `orders`, `order_items`, and `settings`, and seeds the item catalog from your rate sheet (edit rates any time from `/admin/items` — the seed is just a starting point).
-3. Copy `.env.example` to `.env.local` and fill in all four values.
-4. Install and run:
-   ```bash
-   npm install
-   npm run dev
-   ```
-5. `http://localhost:3000` redirects to `/book` (the shareable link). `/admin/login` gets you into the admin area.
+Then fill in `.env.local` from `.env.example` (4 values: Supabase URL + service key, admin password + session secret) and:
+```bash
+npm install
+npm run dev
+```
+`http://localhost:3000` redirects to `/book`. `/admin/login` gets you into the admin area.
 
 ## API routes
 
 Public:
-- `GET /api/items` — active catalog for the booking page
-- `GET /api/settings` — oil density (used for the live weight preview)
-- `POST /api/orders` — submit an order (`{ customer_name, customer_contact?, notes?, lines: [{item_id, qty}] }`). Rates, types, and weights are always recomputed server-side from the current catalog — a tampered request can't book at a fake price.
+- `GET /api/items` — active catalog (includes rate/weight for client-side calc, even though the UI doesn't render those columns)
+- `POST /api/orders` — submit an order (`{ customer_name, customer_contact?, notes?, lines: [{item_id, qty}] }`). Rate, weight, and type are always re-fetched from the current catalog server-side — a tampered request can't book at a fake price or weight.
 
-Admin (all behind the password):
+Admin (behind the password):
 - `GET/POST /api/admin/items`, `PATCH/DELETE /api/admin/items/[id]`, `POST /api/admin/items/reorder`
-- `GET/PATCH /api/admin/settings`
+- `GET/PATCH /api/admin/settings` — generic key/value store, currently unused by the booking flow (kept for future config)
 - `GET /api/admin/orders`, `GET/PATCH /api/admin/orders/[id]`
-- `POST /api/admin/orders/export` — `.xlsx` with three sheets: **Orders** (one row per order), **Item Totals** (aggregated Item/Qty/Rate/Amount/Type across the selected orders, in the same shape as your rate sheet, with the Weight-Ghee/Weight-Oil/Total Amount footer), and **Line Items** (every line of every selected order)
+- `POST /api/admin/orders/export` — `.xlsx` with three sheets: **Orders** (one row per order, with Amount and total Weight), **Item Totals** (aggregated Item/Qty/Rate/Amount/Weight/Type across the selected orders, with an Amount/Weight footer), and **Line Items** (every line of every selected order)
 
-## Things you may want to adjust
+## Admin protection
 
-- The seeded rates are read off your screenshot — double check them in `/admin/items` before going live, OCR/manual transcription can be off by a digit here and there.
-- If an item name doesn't fit the parser's patterns, it silently gets 0 weight (still counted in Amount). If you add unusual pack names, either match the existing naming conventions or extend `lib/weightParser.ts`.
-- No customer-facing order history/tracking yet — the confirmation is just the order number shown once. Say if you want a "look up my order" page.
+`/admin/*` and `/api/admin/*` are gated by `middleware.ts` behind a single shared password (`ADMIN_PASSWORD`) and a signed session cookie (`ADMIN_SESSION_SECRET`, 12-hour expiry). Simple by design — swap for Supabase Auth later if multiple staff need distinct logins.
+
+## Things you may want to double check
+
+- The seeded weights/rates match what you gave me, including three RSO variants (250ml/500ml/1000ml) all sharing the same weight (5.46) and Soap Carton showing weight 10 — worth a sanity check in `/admin/items` in case that was a transcription slip on the source sheet, not intentional.

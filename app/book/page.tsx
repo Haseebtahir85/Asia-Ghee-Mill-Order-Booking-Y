@@ -2,12 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Item } from "@/lib/types";
-import { parseUnitWeightKg, DEFAULT_OIL_DENSITY_KG_PER_LITER } from "@/lib/weightParser";
 
 export default function BookPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [qtys, setQtys] = useState<Record<string, string>>({});
-  const [oilDensity, setOilDensity] = useState(DEFAULT_OIL_DENSITY_KG_PER_LITER);
   const [loading, setLoading] = useState(true);
   const [customerName, setCustomerName] = useState("");
   const [customerContact, setCustomerContact] = useState("");
@@ -17,42 +15,32 @@ export default function BookPage() {
   const [confirmedOrderNumber, setConfirmedOrderNumber] = useState<string | null>(null);
 
   useEffect(() => {
-    async function load() {
-      const [itemsRes, settingsRes] = await Promise.all([
-        fetch("/api/items"),
-        fetch("/api/settings"),
-      ]);
-      const itemsJson = await itemsRes.json();
-      const settingsJson = await settingsRes.json();
-      setItems(itemsJson.items ?? []);
-      if (settingsJson.oil_density_kg_per_liter) {
-        setOilDensity(settingsJson.oil_density_kg_per_liter);
-      }
-      setLoading(false);
-    }
-    load();
+    fetch("/api/items")
+      .then((r) => r.json())
+      .then((json) => setItems(json.items ?? []))
+      .finally(() => setLoading(false));
   }, []);
 
+  // Rate and per-unit weight are fetched but never rendered — they're
+  // only used here to compute each row's Amount/Weight live as the
+  // customer types a quantity.
   const rows = useMemo(() => {
     return items.map((item) => {
       const qty = parseFloat(qtys[item.id] || "0") || 0;
       const amount = qty * item.rate;
-      const unitWeightKg = parseUnitWeightKg(item.name, oilDensity);
-      const weightKg = unitWeightKg * qty;
-      return { item, qty, amount, weightKg };
+      const weight = qty * item.weight_kg;
+      return { item, qty, amount, weight };
     });
-  }, [items, qtys, oilDensity]);
+  }, [items, qtys]);
 
   const totals = useMemo(() => {
     let amount = 0;
-    let gheeKg = 0;
-    let oilKg = 0;
+    let weight = 0;
     for (const r of rows) {
       amount += r.amount;
-      if (r.item.type === "ghee") gheeKg += r.weightKg;
-      if (r.item.type === "oil") oilKg += r.weightKg;
+      weight += r.weight;
     }
-    return { amount, gheeTon: gheeKg / 1000, oilTon: oilKg / 1000 };
+    return { amount, weight };
   }, [rows]);
 
   function updateQty(itemId: string, value: string) {
@@ -147,14 +135,13 @@ export default function BookPage() {
               <tr style={{ background: "#eee", textAlign: "left" }}>
                 <th style={thStyle}>Item</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Qty</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Rate</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Amount</th>
-                <th style={thStyle}>Type</th>
+                <th style={{ ...thStyle, textAlign: "right" }}>Weight</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ item, qty, amount }) => (
-                <tr key={item.id} style={{ borderBottom: "1px solid #eee", background: item.type === "oil" ? "#eaf6ea" : undefined }}>
+              {rows.map(({ item, amount, weight }) => (
+                <tr key={item.id} style={{ borderBottom: "1px solid #eee" }}>
                   <td style={tdStyle}>{item.name}</td>
                   <td style={{ ...tdStyle, textAlign: "right" }}>
                     <input
@@ -166,27 +153,17 @@ export default function BookPage() {
                       style={{ width: 70, textAlign: "right", padding: "4px 6px" }}
                     />
                   </td>
-                  <td style={{ ...tdStyle, textAlign: "right" }}>{item.rate.toLocaleString()}</td>
                   <td style={{ ...tdStyle, textAlign: "right" }}>{amount ? amount.toLocaleString() : 0}</td>
-                  <td style={tdStyle}>{item.type}</td>
+                  <td style={{ ...tdStyle, textAlign: "right" }}>{weight ? weight.toFixed(2) : 0}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr style={{ fontWeight: 600, borderTop: "2px solid #ccc" }}>
-                <td style={tdStyle}>Weight (Ton)</td>
-                <td style={tdStyle}></td>
+                <td style={tdStyle}>Total</td>
                 <td style={tdStyle}></td>
                 <td style={{ ...tdStyle, textAlign: "right" }}>{totals.amount.toLocaleString()}</td>
-                <td style={tdStyle}></td>
-              </tr>
-              <tr>
-                <td style={tdStyle}>Weight-Ghee</td>
-                <td colSpan={4} style={tdStyle}>{totals.gheeTon.toFixed(2)}</td>
-              </tr>
-              <tr>
-                <td style={tdStyle}>Weight-Oil</td>
-                <td colSpan={4} style={tdStyle}>{totals.oilTon.toFixed(2)}</td>
+                <td style={{ ...tdStyle, textAlign: "right" }}>{totals.weight.toFixed(2)} kg</td>
               </tr>
             </tfoot>
           </table>
@@ -212,7 +189,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 const pageStyle: React.CSSProperties = {
-  maxWidth: 760,
+  maxWidth: 700,
   margin: "0 auto",
   padding: "24px 16px",
   fontFamily: "system-ui, sans-serif",

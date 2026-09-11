@@ -29,9 +29,8 @@ export default function AdminOrderDetailPage({ params }: { params: { id: string 
           <tr style={{ background: "#eee", textAlign: "left" }}>
             <th style={thStyle}>Item</th>
             <th style={{ ...thStyle, textAlign: "right" }}>Qty</th>
-            <th style={{ ...thStyle, textAlign: "right" }}>Rate</th>
             <th style={{ ...thStyle, textAlign: "right" }}>Amount</th>
-            <th style={thStyle}>Type</th>
+            <th style={{ ...thStyle, textAlign: "right" }}>Weight (kg)</th>
           </tr>
         </thead>
         <tbody>
@@ -39,9 +38,8 @@ export default function AdminOrderDetailPage({ params }: { params: { id: string 
             <tr key={li.id} style={{ borderBottom: "1px solid #eee" }}>
               <td style={tdStyle}>{li.item_name}</td>
               <td style={{ ...tdStyle, textAlign: "right" }}>{li.qty}</td>
-              <td style={{ ...tdStyle, textAlign: "right" }}>{li.rate.toLocaleString()}</td>
               <td style={{ ...tdStyle, textAlign: "right" }}>{li.amount.toLocaleString()}</td>
-              <td style={tdStyle}>{li.item_type}</td>
+              <td style={{ ...tdStyle, textAlign: "right" }}>{li.weight_total_kg.toFixed(2)}</td>
             </tr>
           ))}
         </tbody>
@@ -49,8 +47,7 @@ export default function AdminOrderDetailPage({ params }: { params: { id: string 
 
       <div style={{ fontSize: 14, lineHeight: 1.8 }}>
         <div><strong>Total Amount:</strong> {order.total_amount.toLocaleString()}</div>
-        <div><strong>Weight-Ghee:</strong> {(order.total_weight_ghee_kg / 1000).toFixed(2)} ton</div>
-        <div><strong>Weight-Oil:</strong> {(order.total_weight_oil_kg / 1000).toFixed(2)} ton</div>
+        <div><strong>Total Weight:</strong> {order.total_weight_kg.toFixed(2)} kg</div>
         {order.notes && <div><strong>Notes:</strong> {order.notes}</div>}
       </div>
     </main>
