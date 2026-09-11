@@ -5,6 +5,10 @@ import Link from "next/link";
 import { Item, Town } from "@/lib/types";
 import styles from "./book.module.css";
 
+function townLabel(t: Town): string {
+  return t.upc ? `${t.name} (${t.upc})` : t.name;
+}
+
 export default function BookPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [towns, setTowns] = useState<Town[]>([]);
@@ -13,6 +17,7 @@ export default function BookPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState("");
   const [townId, setTownId] = useState("");
+  const [townQuery, setTownQuery] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmedOrderNumber, setConfirmedOrderNumber] = useState<string | null>(null);
@@ -123,6 +128,7 @@ export default function BookPage() {
               setQtys({});
               setCustomerName("");
               setTownId("");
+              setTownQuery("");
             }}
           >
             Book another order
@@ -152,12 +158,23 @@ export default function BookPage() {
             </div>
             <div>
               <label className={styles.fieldLabel}>Town</label>
-              <select className={styles.select} value={townId} onChange={(e) => setTownId(e.target.value)}>
-                <option value="">Select town...</option>
+              <input
+                className={styles.select}
+                list="town-options"
+                placeholder="Type to search towns..."
+                value={townQuery}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setTownQuery(value);
+                  const match = towns.find((t) => townLabel(t) === value);
+                  setTownId(match ? match.id : "");
+                }}
+              />
+              <datalist id="town-options">
                 {towns.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}{t.upc ? ` (${t.upc})` : ""}</option>
+                  <option key={t.id} value={townLabel(t)} />
                 ))}
-              </select>
+              </datalist>
             </div>
           </div>
         </div>
@@ -180,6 +197,12 @@ export default function BookPage() {
           <div className={styles.tableOuter}>
           <div className={styles.tableWrap}>
             <table className={styles.table}>
+              <colgroup>
+                <col style={{ width: "44%" }} />
+                <col style={{ width: "18%" }} />
+                <col style={{ width: "19%" }} />
+                <col style={{ width: "19%" }} />
+              </colgroup>
               <thead>
                 <tr>
                   <th>Item</th>
