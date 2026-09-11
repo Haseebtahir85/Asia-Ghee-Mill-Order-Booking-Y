@@ -1,4 +1,41 @@
+.page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(circle, rgba(11, 43, 91, 0.05) 1px, transparent 1.4px),
+    linear-gradient(180deg, #fff9e6 0%, #f7f9fc 38%, #eef3fb 100%);
+  background-size: 22px 22px, 100% 100%;
+}
+
+.page::before {
+  content: "";
+  position: absolute;
+  top: -120px;
+  left: -110px;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(246, 201, 14, 0.3), transparent 70%);
+  pointer-events: none;
+}
+
+.page::after {
+  content: "";
+  position: absolute;
+  bottom: -160px;
+  right: -130px;
+  width: 380px;
+  height: 380px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(11, 43, 91, 0.14), transparent 70%);
+  pointer-events: none;
+}
+
 .wrapper {
+  position: relative;
+  z-index: 1;
+
   max-width: 800px;
   margin: 0 auto;
   padding: 28px 16px 64px;

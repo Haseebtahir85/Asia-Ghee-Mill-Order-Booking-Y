@@ -105,6 +105,7 @@ export default function BookPage() {
 
   if (confirmedOrderNumber) {
     return (
+      <div className={styles.page}>
       <main className={styles.wrapper}>
         <Header />
         <div className={styles.confirmCard}>
@@ -128,10 +129,12 @@ export default function BookPage() {
           </button>
         </div>
       </main>
+      </div>
     );
   }
 
   return (
+    <div className={styles.page}>
     <main className={styles.wrapper}>
       <Header />
 
@@ -233,6 +236,7 @@ export default function BookPage() {
         </button>
       </form>
     </main>
+    </div>
   );
 }
 
