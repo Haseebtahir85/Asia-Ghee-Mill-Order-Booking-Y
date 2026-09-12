@@ -3,9 +3,11 @@
   min-height: 100vh;
   overflow: hidden;
   background:
+    repeating-linear-gradient(135deg, rgba(246, 201, 14, 0.07) 0px, rgba(246, 201, 14, 0.07) 9px, transparent 9px, transparent 19px),
+    repeating-linear-gradient(45deg, rgba(11, 43, 91, 0.05) 0px, rgba(11, 43, 91, 0.05) 9px, transparent 9px, transparent 19px),
     radial-gradient(circle, rgba(11, 43, 91, 0.05) 1px, transparent 1.4px),
     linear-gradient(180deg, #fff9e6 0%, #f7f9fc 38%, #eef3fb 100%);
-  background-size: 22px 22px, 100% 100%;
+  background-size: auto, auto, 22px 22px, 100% 100%;
 }
 
 .page::before {
@@ -16,7 +18,7 @@
   width: 320px;
   height: 320px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(246, 201, 14, 0.3), transparent 70%);
+  background: radial-gradient(circle, rgba(246, 201, 14, 0.32), transparent 70%);
   pointer-events: none;
 }
 
@@ -28,7 +30,7 @@
   width: 380px;
   height: 380px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(11, 43, 91, 0.14), transparent 70%);
+  background: radial-gradient(circle, rgba(11, 43, 91, 0.16), transparent 70%);
   pointer-events: none;
 }
 
@@ -186,10 +188,11 @@
 
 /* ---------- Item table ---------- */
 .tableOuter {
+  max-width: 560px;
+  margin: 0 auto 20px;
   border-radius: 14px;
   overflow: hidden;
   box-shadow: 0 4px 18px rgba(11, 43, 91, 0.08);
-  margin-bottom: 20px;
   animation: fadeUp 0.4s ease both;
   animation-delay: 0.16s;
 }
@@ -200,11 +203,12 @@
 
 .table {
   width: 100%;
-  min-width: 540px;
+  min-width: 440px;
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   background: #fff;
+  font-variant-numeric: tabular-nums;
 }
 
 .table thead tr {
@@ -212,11 +216,11 @@
 }
 
 .table th {
-  padding: 6px 10px;
+  padding: 6px 8px;
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.4px;
   color: #fff;
   text-align: left;
   white-space: nowrap;
@@ -224,6 +228,10 @@
 
 .right {
   text-align: right;
+}
+
+.center {
+  text-align: center;
 }
 
 .table tbody tr {
@@ -235,7 +243,7 @@
 }
 
 .table td {
-  padding: 3px 10px;
+  padding: 3px 8px;
   font-size: 12.5px;
   line-height: 1.25;
   border-bottom: 1px solid #eef0f4;
@@ -251,6 +259,13 @@
 .itemIcon {
   flex-shrink: 0;
   display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  border: 1.4px solid rgba(11, 43, 91, 0.55);
+  background: #fbfbfd;
 }
 
 .itemIcon svg {
@@ -259,10 +274,11 @@
 }
 
 .qtyInput {
-  width: 48px;
-  text-align: right;
-  padding: 3px 5px;
+  width: 44px;
+  text-align: center;
+  padding: 3px 4px;
   font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
   border: 1.5px solid #e2e5ea;
   border-radius: 6px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -282,6 +298,28 @@
 .totalRow td {
   border-top: 2px solid #f6c90e;
   border-bottom: none;
+}
+
+.breakdownRow td {
+  border-bottom: none;
+  padding-top: 3px;
+  padding-bottom: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #5a6472;
+}
+
+.breakdownLabel {
+  text-align: right;
+  font-style: italic;
+  opacity: 0.75;
+}
+
+.weightBreakdown {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
 }
 
 /* ---------- States ---------- */

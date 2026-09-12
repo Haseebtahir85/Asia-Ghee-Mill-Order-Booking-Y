@@ -56,11 +56,15 @@ export default function BookPage() {
   const totals = useMemo(() => {
     let amount = 0;
     let weight = 0;
+    let gheeWeight = 0;
+    let oilWeight = 0;
     for (const r of rows) {
       amount += r.amount;
       weight += r.weight;
+      if (r.item.type === "ghee") gheeWeight += r.weight;
+      if (r.item.type === "oil") oilWeight += r.weight;
     }
-    return { amount, weight };
+    return { amount, weight, gheeWeight, oilWeight };
   }, [rows]);
 
   function updateQty(itemId: string, value: string) {
@@ -199,14 +203,14 @@ export default function BookPage() {
             <table className={styles.table}>
               <colgroup>
                 <col style={{ width: "44%" }} />
-                <col style={{ width: "18%" }} />
-                <col style={{ width: "19%" }} />
-                <col style={{ width: "19%" }} />
+                <col style={{ width: "16%" }} />
+                <col style={{ width: "20%" }} />
+                <col style={{ width: "20%" }} />
               </colgroup>
               <thead>
                 <tr>
                   <th>Item</th>
-                  <th className={styles.right}>Qty</th>
+                  <th className={styles.center}>Qty</th>
                   <th className={styles.right}>Amount</th>
                   <th className={styles.right}>Weight</th>
                 </tr>
@@ -222,7 +226,7 @@ export default function BookPage() {
                         {item.name}
                       </div>
                     </td>
-                    <td className={styles.right}>
+                    <td className={styles.center}>
                       <input
                         type="number"
                         min={0}
@@ -243,6 +247,15 @@ export default function BookPage() {
                   <td></td>
                   <td className={styles.right}>{totals.amount.toLocaleString()}</td>
                   <td className={styles.right}>{totals.weight.toFixed(2)} kg</td>
+                </tr>
+                <tr className={styles.breakdownRow}>
+                  <td colSpan={3} className={styles.breakdownLabel}>Weight breakdown</td>
+                  <td className={styles.right}>
+                    <div className={styles.weightBreakdown}>
+                      <span>Ghee: {totals.gheeWeight.toFixed(2)} kg</span>
+                      <span>Oil: {totals.oilWeight.toFixed(2)} kg</span>
+                    </div>
+                  </td>
                 </tr>
               </tfoot>
             </table>
@@ -301,37 +314,48 @@ function CheckIcon() {
   );
 }
 
-// Simple, self-drawn glyphs (not sourced from any product photo) so
-// each row has a little visual identity without needing real product
-// photography — a tin/bucket silhouette for ghee, a bottle for oil,
-// a box for everything else.
+// Container-accurate glyphs: ghee items are packed in tins, oil items
+// in cartons/packs, everything else ("other") in a balti (bucket).
+// Each icon sits in a small bordered box (see .itemIcon) so it reads
+// as a distinct little badge next to the item name.
 function ProductIcon({ type }: { type: "ghee" | "oil" | "other" }) {
   if (type === "ghee") {
+    // Tin
     return (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-        <path d="M6 8h12l-1 12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 8z" fill="#F6C90E" stroke="#0B2B5B" strokeWidth="1.4" />
-        <rect x="7" y="5" width="10" height="3" rx="1" fill="#0B2B5B" />
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+        <path
+          d="M6 7.5 6.9 19.6a1.4 1.4 0 0 0 1.4 1.3h7.4a1.4 1.4 0 0 0 1.4-1.3L18 7.5z"
+          fill="#F6C90E"
+          stroke="#0B2B5B"
+          strokeWidth="1.4"
+        />
+        <ellipse cx="12" cy="7.5" rx="6" ry="1.9" fill="#FDE58A" stroke="#0B2B5B" strokeWidth="1.4" />
+        <path d="M8.3 7.4V6.1a1 1 0 0 1 1-1h5.4a1 1 0 0 1 1 1v1.3" stroke="#0B2B5B" strokeWidth="1.1" fill="none" />
+        <path d="M6.6 12.5c1.6.7 9.2.7 10.8 0" stroke="#0B2B5B" strokeWidth="0.8" opacity="0.35" fill="none" />
       </svg>
     );
   }
   if (type === "oil") {
+    // Carton / pack
     return (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-        <path
-          d="M10 3h4v3.2l2.2 3.3c.5.8.8 1.7.8 2.6V19a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2v-6.9c0-.9.3-1.8.8-2.6L10 6.2V3z"
-          fill="#FDE9A8"
-          stroke="#D62828"
-          strokeWidth="1.4"
-        />
-        <rect x="9.5" y="2" width="5" height="2" rx="0.5" fill="#0B2B5B" />
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+        <path d="M4 8.5 12 5l8 3.5v9L12 21 4 17.5z" fill="#FDE9A8" stroke="#D62828" strokeWidth="1.4" />
+        <path d="M4 8.5 12 12l8-3.5M12 12v9" stroke="#D62828" strokeWidth="1.3" fill="none" />
+        <path d="M7.7 6.8 15.7 10.3" stroke="#0B2B5B" strokeWidth="1" opacity="0.5" />
       </svg>
     );
   }
+  // Balti (bucket)
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <path d="M4 8l8-4 8 4-8 4-8-4z" fill="#e2e5ea" stroke="#0B2B5B" strokeWidth="1.2" />
-      <path d="M4 8v9l8 4 8-4V8" stroke="#0B2B5B" strokeWidth="1.2" fill="none" />
-      <path d="M12 12v9" stroke="#0B2B5B" strokeWidth="1.2" />
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M6.5 8h11l-1.3 10.2a1.8 1.8 0 0 1-1.78 1.6H9.58a1.8 1.8 0 0 1-1.78-1.6L6.5 8z"
+        fill="#e2e5ea"
+        stroke="#0B2B5B"
+        strokeWidth="1.4"
+      />
+      <path d="M5.5 8h13" stroke="#0B2B5B" strokeWidth="1.4" />
+      <path d="M8.5 8c0-3 1.5-4.6 3.5-4.6S15.5 5 15.5 8" stroke="#0B2B5B" strokeWidth="1.3" fill="none" />
     </svg>
   );
 }
