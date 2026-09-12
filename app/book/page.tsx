@@ -9,13 +9,12 @@ function townLabel(t: Town): string {
   return t.upc ? `${t.name} (${t.upc})` : t.name;
 }
 
-// Icon is decided by what the item is actually called, not its
-// category field. This is a plain substring check, so it doesn't
-// matter what comes before the container word — "6 Kg Tin",
-// "16 Kg Tin (B)", "5 Ltr Tin", "10 Kg Pack", "5 Ltr Pack", and
-// "20 Kg Bucket" all resolve correctly off the word tin/pack/bucket.
-// RSO and Soap are checked first since those are specific products,
-// not containers.
+// Icon/category is decided by what the item is actually called, not
+// its category field. Plain substring check, so it doesn't matter
+// what comes before the container word — "6 Kg Tin", "16 Kg Tin (B)",
+// "1 Kg 12 Pack", "16 Kg Bucket" all resolve correctly off the word
+// tin/pack/bucket. RSO and Soap are checked first since those are
+// specific products, not containers.
 type IconKind = "tin" | "pack" | "bucket" | "bottle" | "soap";
 
 function getIconKind(item: Item): IconKind {
@@ -65,13 +64,14 @@ export default function BookPage() {
 
   // Rate and per-unit weight are fetched but never rendered — they're
   // only used here to compute each row's Amount/Weight live as the
-  // customer types a quantity.
+  // customer types a quantity. `kind` drives both the icon and the
+  // group-divider logic below.
   const rows = useMemo(() => {
     return items.map((item) => {
       const qty = parseFloat(qtys[item.id] || "0") || 0;
       const amount = qty * item.rate;
       const weight = qty * item.weight_kg;
-      return { item, qty, amount, weight };
+      return { item, qty, amount, weight, kind: getIconKind(item) };
     });
   }, [items, qtys]);
 
@@ -238,30 +238,37 @@ export default function BookPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map(({ item, amount, weight }, i) => (
-                  <tr key={item.id} style={{ animation: "fadeUp 0.35s ease both", animationDelay: `${Math.min(i * 0.02, 0.4)}s` }}>
-                    <td>
-                      <div className={styles.itemCell}>
-                        <span className={styles.itemIcon}>
-                          <ProductIcon kind={getIconKind(item)} />
-                        </span>
-                        {item.name}
-                      </div>
-                    </td>
-                    <td className={styles.center}>
-                      <input
-                        type="number"
-                        min={0}
-                        step="1"
-                        value={qtys[item.id] ?? ""}
-                        onChange={(e) => updateQty(item.id, e.target.value)}
-                        className={styles.qtyInput}
-                      />
-                    </td>
-                    <td className={styles.right}>{amount ? amount.toLocaleString() : 0}</td>
-                    <td className={styles.right}>{weight ? weight.toFixed(2) : 0}</td>
-                  </tr>
-                ))}
+                {rows.map(({ item, amount, weight, kind }, i) => {
+                  const isGroupEnd = i === rows.length - 1 || rows[i + 1].kind !== kind;
+                  return (
+                    <tr
+                      key={item.id}
+                      className={isGroupEnd ? styles.groupEnd : undefined}
+                      style={{ animation: "fadeUp 0.35s ease both", animationDelay: `${Math.min(i * 0.02, 0.4)}s` }}
+                    >
+                      <td>
+                        <div className={styles.itemCell}>
+                          <span className={styles.itemIcon}>
+                            <ProductIcon kind={kind} />
+                          </span>
+                          {item.name}
+                        </div>
+                      </td>
+                      <td className={styles.center}>
+                        <input
+                          type="number"
+                          min={0}
+                          step="1"
+                          value={qtys[item.id] ?? ""}
+                          onChange={(e) => updateQty(item.id, e.target.value)}
+                          className={styles.qtyInput}
+                        />
+                      </td>
+                      <td className={styles.right}>{amount ? amount.toLocaleString() : 0}</td>
+                      <td className={styles.right}>{weight ? weight.toFixed(2) : 0}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr className={styles.totalRow}>

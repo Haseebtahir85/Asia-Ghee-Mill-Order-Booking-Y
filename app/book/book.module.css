@@ -251,6 +251,13 @@
   vertical-align: middle;
 }
 
+/* Dark divider under the last row of each category group
+   (Tin / Pack / Bucket / etc.) so the groups read as separate
+   blocks inside the same table. */
+.groupEnd td {
+  border-bottom: 2.5px solid #0b2b5b;
+}
+
 .itemCell {
   display: flex;
   align-items: center;
