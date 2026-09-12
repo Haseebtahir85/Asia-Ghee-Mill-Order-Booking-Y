@@ -10,10 +10,12 @@ function townLabel(t: Town): string {
 }
 
 // Icon is decided by what the item is actually called, not its
-// category field — catalog names like "5 Kg Tin", "10 Kg Pack",
-// "17 Kg Bucket" carry the real container in the name (Kg/Ltr is
-// just the unit and doesn't change the icon). RSO and Soap are
-// checked first since those are specific products, not containers.
+// category field. This is a plain substring check, so it doesn't
+// matter what comes before the container word — "6 Kg Tin",
+// "16 Kg Tin (B)", "5 Ltr Tin", "10 Kg Pack", "5 Ltr Pack", and
+// "20 Kg Bucket" all resolve correctly off the word tin/pack/bucket.
+// RSO and Soap are checked first since those are specific products,
+// not containers.
 type IconKind = "tin" | "pack" | "bucket" | "bottle" | "soap";
 
 function getIconKind(item: Item): IconKind {

@@ -3,11 +3,12 @@
   min-height: 100vh;
   overflow: hidden;
   background:
-    repeating-linear-gradient(45deg, rgba(11, 43, 91, 0.07) 0px, rgba(11, 43, 91, 0.07) 8px, rgba(11, 43, 91, 0.02) 8px, rgba(11, 43, 91, 0.02) 16px),
-    repeating-linear-gradient(-45deg, rgba(246, 201, 14, 0.1) 0px, rgba(246, 201, 14, 0.1) 8px, rgba(246, 201, 14, 0.03) 8px, rgba(246, 201, 14, 0.03) 16px),
-    radial-gradient(circle at 1px 1px, rgba(11, 43, 91, 0.09) 1px, transparent 1.6px),
-    linear-gradient(180deg, #fff7d9 0%, #f7f9fc 40%, #e9f0fb 100%);
-  background-size: 16px 16px, 16px 16px, 20px 20px, 100% 100%;
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E"),
+    linear-gradient(135deg, rgba(246, 201, 14, 0.22) 0%, transparent 48%),
+    linear-gradient(320deg, rgba(11, 43, 91, 0.18) 0%, transparent 48%),
+    linear-gradient(180deg, #fff6d4 0%, #f8f9fb 46%, #e7eef9 100%);
+  background-size: 140px 140px, auto, auto, 100% 100%;
+  background-blend-mode: overlay, normal, normal, normal;
 }
 
 .page::before {
@@ -18,7 +19,7 @@
   width: 320px;
   height: 320px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(246, 201, 14, 0.35), transparent 70%);
+  background: radial-gradient(circle, rgba(246, 201, 14, 0.4), transparent 70%);
   pointer-events: none;
 }
 
@@ -30,7 +31,7 @@
   width: 380px;
   height: 380px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(11, 43, 91, 0.18), transparent 70%);
+  background: radial-gradient(circle, rgba(11, 43, 91, 0.22), transparent 70%);
   pointer-events: none;
 }
 
@@ -190,8 +191,8 @@
 .tableOuter {
   border-radius: 14px;
   overflow: hidden;
-  border: 2px solid #0b2b5b;
-  box-shadow: 0 4px 18px rgba(11, 43, 91, 0.1);
+  border: 3px solid #071b3a;
+  box-shadow: 0 4px 18px rgba(11, 43, 91, 0.12);
   margin-bottom: 20px;
   animation: fadeUp 0.4s ease both;
   animation-delay: 0.16s;
@@ -261,16 +262,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 21px;
-  height: 21px;
-  border-radius: 6px;
-  border: 1.8px solid #0b2b5b;
-  background: #fff;
 }
 
 .itemIcon svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .qtyInput {
