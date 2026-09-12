@@ -236,11 +236,11 @@ export default function AdminItemsPage() {
     <main style={{ maxWidth: 950, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 16 }}>Items, Weights & Rates</h1>
 
-      <form onSubmit={addItem} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr auto", gap: 10, marginBottom: 24, padding: 14, border: "1px solid #ddd", borderRadius: 8 }}>
-        <input placeholder="Item name (e.g. 1 Kg 12 Pack)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        <input type="number" step="0.01" placeholder="Weight (kg)" value={form.weight_kg} onChange={(e) => setForm({ ...form, weight_kg: e.target.value })} />
-        <input type="number" step="0.01" placeholder="Rate" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} />
-        <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as ItemType })}>
+      <form onSubmit={addItem} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 24, padding: 14, border: "1px solid #ddd", borderRadius: 8 }}>
+        <input placeholder="Item name (e.g. 1 Kg 12 Pack)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
+        <input type="number" step="0.01" placeholder="Weight (kg)" value={form.weight_kg} onChange={(e) => setForm({ ...form, weight_kg: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
+        <input type="number" step="0.01" placeholder="Rate" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
+        <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as ItemType })} style={{ minWidth: 0, width: "100%" }}>
           <option value="ghee">Ghee</option>
           <option value="oil">Oil</option>
           <option value="other">Other</option>
@@ -254,7 +254,18 @@ export default function AdminItemsPage() {
       {loading ? (
         <p>Loading...</p>
       ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", minWidth: 720, borderCollapse: "collapse" }}>
+          <colgroup>
+            <col style={{ width: 46 }} />
+            <col style={{ minWidth: 220 }} />
+            <col style={{ width: 100 }} />
+            <col style={{ width: 100 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 70 }} />
+            <col style={{ width: 70 }} />
+          </colgroup>
           <thead>
             <tr style={{ textAlign: "left", borderBottom: "2px solid #ddd" }}>
               <th style={thStyle}></th>
@@ -278,7 +289,7 @@ export default function AdminItemsPage() {
                   <input
                     defaultValue={item.name}
                     onBlur={(e) => e.target.value !== item.name && updateItem(item.id, { name: e.target.value })}
-                    style={{ width: "100%", border: "1px solid transparent", padding: 4 }}
+                    style={{ width: "100%", minWidth: 200, border: "1px solid transparent", padding: 4, boxSizing: "border-box" }}
                   />
                 </td>
                 <td style={tdStyle}>
@@ -319,6 +330,7 @@ export default function AdminItemsPage() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </main>
   );
