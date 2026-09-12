@@ -57,6 +57,8 @@ export async function POST(req: NextRequest) {
       rate: body.rate,
       type: body.type,
       icon: body.icon ?? null,
+      item_number: body.item_number ?? null,
+      sku_number: body.sku_number ?? null,
       sort_order: sortOrder,
       is_active: body.is_active ?? true,
     })

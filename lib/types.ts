@@ -9,6 +9,8 @@ export interface Item {
   rate: number; // per unit sold
   type: ItemType;
   icon: IconKind | null; // explicit icon choice; falls back to name/type guessing when null
+  item_number: string | null; // admin-only reference number; never sent to the public /book page
+  sku_number: string | null; // admin-only SKU; never sent to the public /book page
   sort_order: number;
   is_active: boolean;
   created_at: string;

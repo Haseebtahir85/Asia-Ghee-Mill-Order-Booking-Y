@@ -11,7 +11,15 @@ const ICON_OPTIONS: { value: IconKind; label: string }[] = [
   { value: "soap", label: "Soap" },
 ];
 
-const emptyForm = { name: "", weight_kg: "", rate: "", type: "ghee" as ItemType, icon: "tin" as IconKind };
+const emptyForm = {
+  name: "",
+  weight_kg: "",
+  rate: "",
+  type: "ghee" as ItemType,
+  icon: "tin" as IconKind,
+  item_number: "",
+  sku_number: "",
+};
 
 // Same five glyphs used on the public /book page, kept in sync so the
 // icon an admin picks here is exactly what customers will see there:
@@ -160,6 +168,13 @@ export default function AdminItemsPage() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{
+    updatedCount: number;
+    notFound: string[];
+    skippedNoValues: string[];
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function loadItems() {
     setLoading(true);
@@ -172,6 +187,34 @@ export default function AdminItemsPage() {
   useEffect(() => {
     loadItems();
   }, []);
+
+  async function handleExcelFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file next time
+    if (!file) return;
+
+    setImporting(true);
+    setImportResult(null);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch("/api/admin/items/bulk-update", {
+      method: "POST",
+      body: formData,
+    });
+    const json = await res.json().catch(() => ({}));
+    setImporting(false);
+
+    if (!res.ok) {
+      setError(json.error ?? "Failed to update from file");
+      return;
+    }
+
+    setImportResult(json);
+    loadItems();
+  }
 
   async function addItem(e: React.FormEvent) {
     e.preventDefault();
@@ -191,6 +234,8 @@ export default function AdminItemsPage() {
         rate: parseFloat(form.rate),
         type: form.type,
         icon: form.icon,
+        item_number: form.item_number || null,
+        sku_number: form.sku_number || null,
       }),
     });
 
@@ -234,10 +279,47 @@ export default function AdminItemsPage() {
 
   return (
     <main style={{ maxWidth: 950, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 16 }}>Items, Weights & Rates</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0 }}>Items, Weights & Rates</h1>
+        <div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={handleExcelFile}
+            style={{ display: "none" }}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            style={{ ...buttonStyle, background: "#0b2b5b" }}
+          >
+            {importing ? "Updating..." : "Update Data via Excel"}
+          </button>
+        </div>
+      </div>
+
+      {importResult && (
+        <div style={{ background: "#eef6ee", border: "1px solid #bfe0bf", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13 }}>
+          <div>Updated {importResult.updatedCount} item{importResult.updatedCount === 1 ? "" : "s"} from the file.</div>
+          {importResult.notFound.length > 0 && (
+            <div style={{ marginTop: 4, color: "#7a5a00" }}>
+              Not found in catalog: {importResult.notFound.join(", ")}
+            </div>
+          )}
+          {importResult.skippedNoValues.length > 0 && (
+            <div style={{ marginTop: 4, color: "#7a5a00" }}>
+              No weight/rate value in file for: {importResult.skippedNoValues.join(", ")}
+            </div>
+          )}
+        </div>
+      )}
 
       <form onSubmit={addItem} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 24, padding: 14, border: "1px solid #ddd", borderRadius: 8 }}>
         <input placeholder="Item name (e.g. 1 Kg 12 Pack)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
+        <input placeholder="Item #" value={form.item_number} onChange={(e) => setForm({ ...form, item_number: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
+        <input placeholder="SKU" value={form.sku_number} onChange={(e) => setForm({ ...form, sku_number: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
         <input type="number" step="1" placeholder="Weight (kg)" value={form.weight_kg} onChange={(e) => setForm({ ...form, weight_kg: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
         <input type="number" step="1" placeholder="Rate" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
         <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as ItemType })} style={{ minWidth: 0, width: "100%" }}>
@@ -258,7 +340,9 @@ export default function AdminItemsPage() {
         <table style={{ width: "100%", minWidth: 720, borderCollapse: "collapse" }}>
           <colgroup>
             <col style={{ width: 46 }} />
-            <col style={{ minWidth: 220 }} />
+            <col style={{ minWidth: 200 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 90 }} />
             <col style={{ width: 100 }} />
             <col style={{ width: 100 }} />
             <col style={{ width: 90 }} />
@@ -270,6 +354,8 @@ export default function AdminItemsPage() {
             <tr style={{ textAlign: "left", borderBottom: "2px solid #ddd" }}>
               <th style={thStyle}></th>
               <th style={thStyle}>Item</th>
+              <th style={thStyle}>Item #</th>
+              <th style={thStyle}>SKU</th>
               <th style={thStyle}>Weight (kg)</th>
               <th style={thStyle}>Rate</th>
               <th style={thStyle}>Type</th>
@@ -289,7 +375,21 @@ export default function AdminItemsPage() {
                   <input
                     defaultValue={item.name}
                     onBlur={(e) => e.target.value !== item.name && updateItem(item.id, { name: e.target.value })}
-                    style={{ width: "100%", minWidth: 200, border: "1px solid transparent", padding: 4, boxSizing: "border-box" }}
+                    style={{ width: "100%", minWidth: 180, border: "1px solid transparent", padding: 4, boxSizing: "border-box" }}
+                  />
+                </td>
+                <td style={tdStyle}>
+                  <input
+                    defaultValue={item.item_number ?? ""}
+                    onBlur={(e) => e.target.value !== (item.item_number ?? "") && updateItem(item.id, { item_number: e.target.value || null })}
+                    style={{ width: "100%", border: "1px solid transparent", padding: 4, boxSizing: "border-box" }}
+                  />
+                </td>
+                <td style={tdStyle}>
+                  <input
+                    defaultValue={item.sku_number ?? ""}
+                    onBlur={(e) => e.target.value !== (item.sku_number ?? "") && updateItem(item.id, { sku_number: e.target.value || null })}
+                    style={{ width: "100%", border: "1px solid transparent", padding: 4, boxSizing: "border-box" }}
                   />
                 </td>
                 <td style={tdStyle}>
