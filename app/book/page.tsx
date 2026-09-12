@@ -9,15 +9,18 @@ function townLabel(t: Town): string {
   return t.upc ? `${t.name} (${t.upc})` : t.name;
 }
 
-// Icon/category is decided by what the item is actually called, not
-// its category field. Plain substring check, so it doesn't matter
-// what comes before the container word — "6 Kg Tin", "16 Kg Tin (B)",
-// "1 Kg 12 Pack", "16 Kg Bucket" all resolve correctly off the word
-// tin/pack/bucket. RSO and Soap are checked first since those are
-// specific products, not containers.
+// Icon is the admin's explicit choice (item.icon) when one is set.
+// Otherwise it's guessed from what the item is called — a plain
+// substring check, so it doesn't matter what comes before the
+// container word — "6 Kg Tin", "16 Kg Tin (B)", "1 Kg 12 Pack",
+// "16 Kg Bucket" all resolve correctly off the word tin/pack/bucket.
+// RSO and Soap are checked first since those are specific products,
+// not containers. Category is the last-resort fallback.
 type IconKind = "tin" | "pack" | "bucket" | "bottle" | "soap";
 
 function getIconKind(item: Item): IconKind {
+  if (item.icon) return item.icon;
+
   const n = item.name.toLowerCase();
   if (n.includes("rso")) return "bottle";
   if (n.includes("soap")) return "soap";

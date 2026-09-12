@@ -1,5 +1,6 @@
 export type ItemType = "ghee" | "oil" | "other";
 export type OrderStatus = "pending" | "confirmed" | "dispatched" | "delivered" | "cancelled";
+export type IconKind = "tin" | "pack" | "bucket" | "bottle" | "soap";
 
 export interface Item {
   id: string;
@@ -7,6 +8,7 @@ export interface Item {
   weight_kg: number; // per unit sold
   rate: number; // per unit sold
   type: ItemType;
+  icon: IconKind | null; // explicit icon choice; falls back to name/type guessing when null
   sort_order: number;
   is_active: boolean;
   created_at: string;

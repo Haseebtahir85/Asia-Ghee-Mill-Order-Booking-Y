@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase";
 
+const VALID_ICONS = ["tin", "pack", "bucket", "bottle", "soap"];
+
 interface Params {
   params: { id: string };
 }
 
-// PATCH /api/admin/items/:id — update name/rate/type/is_active/sort_order
+// PATCH /api/admin/items/:id — update name/rate/type/icon/is_active/sort_order
 export async function PATCH(req: NextRequest, { params }: Params) {
   const body = await req.json();
 
@@ -14,6 +16,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   if (body.type && !["ghee", "oil", "other"].includes(body.type)) {
     return NextResponse.json({ error: "type must be ghee, oil, or other" }, { status: 400 });
+  }
+  if (body.icon !== undefined && body.icon !== null && !VALID_ICONS.includes(body.icon)) {
+    return NextResponse.json(
+      { error: `icon must be one of ${VALID_ICONS.join(", ")}` },
+      { status: 400 }
+    );
   }
 
   const { data, error } = await supabaseServer

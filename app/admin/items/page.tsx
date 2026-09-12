@@ -1,9 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Item, ItemType } from "@/lib/types";
+import { Item, ItemType, IconKind } from "@/lib/types";
 
-const emptyForm = { name: "", weight_kg: "", rate: "", type: "ghee" as ItemType };
+const ICON_OPTIONS: { value: IconKind; label: string }[] = [
+  { value: "tin", label: "Tin" },
+  { value: "pack", label: "Pack / Carton" },
+  { value: "bucket", label: "Bucket (Balti)" },
+  { value: "bottle", label: "Bottle" },
+  { value: "soap", label: "Soap" },
+];
+
+const emptyForm = { name: "", weight_kg: "", rate: "", type: "ghee" as ItemType, icon: "tin" as IconKind };
 
 export default function AdminItemsPage() {
   const [items, setItems] = useState<Item[]>([]);
@@ -40,6 +48,7 @@ export default function AdminItemsPage() {
         weight_kg: parseFloat(form.weight_kg),
         rate: parseFloat(form.rate),
         type: form.type,
+        icon: form.icon,
       }),
     });
 
@@ -85,7 +94,7 @@ export default function AdminItemsPage() {
     <main style={{ maxWidth: 950, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 16 }}>Items, Weights & Rates</h1>
 
-      <form onSubmit={addItem} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr auto", gap: 10, marginBottom: 24, padding: 14, border: "1px solid #ddd", borderRadius: 8 }}>
+      <form onSubmit={addItem} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr auto", gap: 10, marginBottom: 24, padding: 14, border: "1px solid #ddd", borderRadius: 8 }}>
         <input placeholder="Item name (e.g. 1 Kg 12 Pack)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         <input type="number" step="0.01" placeholder="Weight (kg)" value={form.weight_kg} onChange={(e) => setForm({ ...form, weight_kg: e.target.value })} />
         <input type="number" step="0.01" placeholder="Rate" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} />
@@ -93,6 +102,11 @@ export default function AdminItemsPage() {
           <option value="ghee">Ghee</option>
           <option value="oil">Oil</option>
           <option value="other">Other</option>
+        </select>
+        <select value={form.icon} onChange={(e) => setForm({ ...form, icon: e.target.value as IconKind })}>
+          {ICON_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
         </select>
         <button type="submit" style={buttonStyle}>Add</button>
       </form>
@@ -110,6 +124,7 @@ export default function AdminItemsPage() {
               <th style={thStyle}>Weight (kg)</th>
               <th style={thStyle}>Rate</th>
               <th style={thStyle}>Type</th>
+              <th style={thStyle}>Icon</th>
               <th style={thStyle}>Active</th>
               <th style={thStyle}></th>
             </tr>
@@ -151,6 +166,14 @@ export default function AdminItemsPage() {
                     <option value="ghee">Ghee</option>
                     <option value="oil">Oil</option>
                     <option value="other">Other</option>
+                  </select>
+                </td>
+                <td style={tdStyle}>
+                  <select value={item.icon ?? ""} onChange={(e) => updateItem(item.id, { icon: e.target.value as IconKind })}>
+                    <option value="" disabled>Choose...</option>
+                    {ICON_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
                   </select>
                 </td>
                 <td style={tdStyle}>

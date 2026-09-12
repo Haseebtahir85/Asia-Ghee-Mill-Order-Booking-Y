@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase";
 
+const VALID_ICONS = ["tin", "pack", "bucket", "bottle", "soap"];
+
 // GET /api/admin/items — all items (active + inactive), in sort order
 export async function GET() {
   const { data, error } = await supabaseServer
@@ -28,6 +30,12 @@ export async function POST(req: NextRequest) {
   if (!["ghee", "oil", "other"].includes(body.type)) {
     return NextResponse.json({ error: "type must be ghee, oil, or other" }, { status: 400 });
   }
+  if (body.icon !== undefined && body.icon !== null && !VALID_ICONS.includes(body.icon)) {
+    return NextResponse.json(
+      { error: `icon must be one of ${VALID_ICONS.join(", ")}` },
+      { status: 400 }
+    );
+  }
 
   // default new items to the end of the list
   let sortOrder = body.sort_order;
@@ -48,6 +56,7 @@ export async function POST(req: NextRequest) {
       weight_kg: body.weight_kg,
       rate: body.rate,
       type: body.type,
+      icon: body.icon ?? null,
       sort_order: sortOrder,
       is_active: body.is_active ?? true,
     })
