@@ -9,18 +9,24 @@ function townLabel(t: Town): string {
   return t.upc ? `${t.name} (${t.upc})` : t.name;
 }
 
-// Icon is picked by product name first (RSO -> bottle, Soap -> soap bar),
-// falling back to the item's category (ghee -> tin, oil -> carton,
-// everything else -> balti/bucket).
-type IconKind = "tin" | "carton" | "balti" | "bottle" | "soap";
+// Icon is decided by what the item is actually called, not its
+// category field — catalog names like "5 Kg Tin", "10 Kg Pack",
+// "17 Kg Bucket" carry the real container in the name (Kg/Ltr is
+// just the unit and doesn't change the icon). RSO and Soap are
+// checked first since those are specific products, not containers.
+type IconKind = "tin" | "pack" | "bucket" | "bottle" | "soap";
 
 function getIconKind(item: Item): IconKind {
   const n = item.name.toLowerCase();
   if (n.includes("rso")) return "bottle";
   if (n.includes("soap")) return "soap";
+  if (n.includes("tin")) return "tin";
+  if (n.includes("pack")) return "pack";
+  if (n.includes("bucket") || n.includes("balti")) return "bucket";
+  // Fallback for names that don't carry a container word
   if (item.type === "ghee") return "tin";
-  if (item.type === "oil") return "carton";
-  return "balti";
+  if (item.type === "oil") return "pack";
+  return "bucket";
 }
 
 export default function BookPage() {
@@ -328,32 +334,37 @@ function CheckIcon() {
   );
 }
 
-// Five visually distinct container glyphs. Tin is a straight-sided
-// cylinder (two rim ellipses + vertical sides); balti is a tapered
-// trapezoid with a handle — they no longer share a silhouette.
+// Five distinct container glyphs — each has its own silhouette so
+// tin/pack/bucket never read as the same shape at a glance:
+//   tin    -> straight cylinder, flat rim + flat base
+//   pack   -> square carton with a folded top flap
+//   bucket -> wide-to-narrow trapezoid with a handle arc
+//   bottle -> tapered oil bottle (RSO)
+//   soap   -> rounded bar
 function ProductIcon({ kind }: { kind: IconKind }) {
   if (kind === "tin") {
     return (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-        <path d="M6.5 8.2v10.6c0 1.2 2.46 2.2 5.5 2.2s5.5-1 5.5-2.2V8.2" fill="#F6C90E" stroke="#0B2B5B" strokeWidth="1.4" />
-        <ellipse cx="12" cy="8.2" rx="5.5" ry="1.9" fill="#FDE58A" stroke="#0B2B5B" strokeWidth="1.4" />
-        <ellipse cx="12" cy="5.3" rx="2.4" ry="0.9" fill="#0B2B5B" />
-        <path d="M6.5 13c1.8.8 9.2.8 11 0" stroke="#0B2B5B" strokeWidth="0.8" opacity="0.3" fill="none" />
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+        <rect x="6.5" y="8" width="11" height="11.5" rx="0.6" fill="#F6C90E" stroke="#0B2B5B" strokeWidth="1.4" />
+        <ellipse cx="12" cy="8" rx="5.5" ry="1.8" fill="#FDE58A" stroke="#0B2B5B" strokeWidth="1.4" />
+        <ellipse cx="12" cy="19.5" rx="5.5" ry="1.2" fill="none" stroke="#0B2B5B" strokeWidth="1" opacity="0.5" />
+        <rect x="9.5" y="4.6" width="5" height="1.7" rx="0.4" fill="#0B2B5B" />
       </svg>
     );
   }
-  if (kind === "carton") {
+  if (kind === "pack") {
     return (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-        <path d="M4 8.5 12 5l8 3.5v9L12 21 4 17.5z" fill="#FDE9A8" stroke="#D62828" strokeWidth="1.4" />
-        <path d="M4 8.5 12 12l8-3.5M12 12v9" stroke="#D62828" strokeWidth="1.3" fill="none" />
-        <path d="M7.7 6.8 15.7 10.3" stroke="#0B2B5B" strokeWidth="1" opacity="0.5" />
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+        <rect x="5" y="9" width="14" height="11" rx="0.5" fill="#FDE9A8" stroke="#D62828" strokeWidth="1.4" />
+        <path d="M5 9 9 5h6l4 4" fill="#FBE0B0" stroke="#D62828" strokeWidth="1.3" />
+        <path d="M9 5v4M15 5v4" stroke="#D62828" strokeWidth="1" opacity="0.6" />
+        <path d="M5 13.5h14" stroke="#0B2B5B" strokeWidth="1" opacity="0.4" />
       </svg>
     );
   }
   if (kind === "bottle") {
     return (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
         <path d="M10 2.5h4v3.1l1.6 2.4c.4.6.6 1.3.6 2V19a2.5 2.5 0 0 1-2.5 2.5h-3.4A2.5 2.5 0 0 1 7.8 19v-9c0-.7.2-1.4.6-2L10 5.6V2.5z" fill="#CFE8E0" stroke="#0B2B5B" strokeWidth="1.4" />
         <rect x="9.6" y="1.4" width="4.8" height="1.6" rx="0.4" fill="#0B2B5B" />
         <rect x="8.2" y="11.5" width="7.6" height="5" fill="#1B8A6B" opacity="0.75" />
@@ -362,15 +373,15 @@ function ProductIcon({ kind }: { kind: IconKind }) {
   }
   if (kind === "soap") {
     return (
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
         <rect x="3.5" y="8.5" width="17" height="9" rx="4" fill="#F7D9E6" stroke="#0B2B5B" strokeWidth="1.4" />
         <path d="M7 10.8c3.5 1.6 6.5 1.6 10 0" stroke="#0B2B5B" strokeWidth="1" opacity="0.45" fill="none" />
       </svg>
     );
   }
-  // balti (bucket) — trapezoid + handle, wider at the top
+  // bucket
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
       <path d="M5 7.5h14l-2 11.2a1.6 1.6 0 0 1-1.58 1.3H8.58A1.6 1.6 0 0 1 7 18.7L5 7.5z" fill="#DCE1E8" stroke="#0B2B5B" strokeWidth="1.4" />
       <path d="M4 7.5h16" stroke="#0B2B5B" strokeWidth="1.4" />
       <path d="M7.5 7.5c0-2.6 2-4 4.5-4s4.5 1.4 4.5 4" stroke="#0B2B5B" strokeWidth="1.3" fill="none" />

@@ -3,11 +3,11 @@
   min-height: 100vh;
   overflow: hidden;
   background:
-    repeating-linear-gradient(135deg, rgba(246, 201, 14, 0.07) 0px, rgba(246, 201, 14, 0.07) 9px, transparent 9px, transparent 19px),
-    repeating-linear-gradient(45deg, rgba(11, 43, 91, 0.05) 0px, rgba(11, 43, 91, 0.05) 9px, transparent 9px, transparent 19px),
-    radial-gradient(circle, rgba(11, 43, 91, 0.05) 1px, transparent 1.4px),
-    linear-gradient(180deg, #fff9e6 0%, #f7f9fc 38%, #eef3fb 100%);
-  background-size: auto, auto, 22px 22px, 100% 100%;
+    repeating-linear-gradient(45deg, rgba(11, 43, 91, 0.07) 0px, rgba(11, 43, 91, 0.07) 8px, rgba(11, 43, 91, 0.02) 8px, rgba(11, 43, 91, 0.02) 16px),
+    repeating-linear-gradient(-45deg, rgba(246, 201, 14, 0.1) 0px, rgba(246, 201, 14, 0.1) 8px, rgba(246, 201, 14, 0.03) 8px, rgba(246, 201, 14, 0.03) 16px),
+    radial-gradient(circle at 1px 1px, rgba(11, 43, 91, 0.09) 1px, transparent 1.6px),
+    linear-gradient(180deg, #fff7d9 0%, #f7f9fc 40%, #e9f0fb 100%);
+  background-size: 16px 16px, 16px 16px, 20px 20px, 100% 100%;
 }
 
 .page::before {
@@ -18,7 +18,7 @@
   width: 320px;
   height: 320px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(246, 201, 14, 0.32), transparent 70%);
+  background: radial-gradient(circle, rgba(246, 201, 14, 0.35), transparent 70%);
   pointer-events: none;
 }
 
@@ -30,7 +30,7 @@
   width: 380px;
   height: 380px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(11, 43, 91, 0.16), transparent 70%);
+  background: radial-gradient(circle, rgba(11, 43, 91, 0.18), transparent 70%);
   pointer-events: none;
 }
 
@@ -261,13 +261,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 21px;
+  height: 21px;
+  border-radius: 6px;
+  border: 1.8px solid #0b2b5b;
+  background: #fff;
 }
 
 .itemIcon svg {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
 }
 
 .qtyInput {
