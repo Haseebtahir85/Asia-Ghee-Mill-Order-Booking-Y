@@ -9,6 +9,20 @@ function townLabel(t: Town): string {
   return t.upc ? `${t.name} (${t.upc})` : t.name;
 }
 
+// Icon is picked by product name first (RSO -> bottle, Soap -> soap bar),
+// falling back to the item's category (ghee -> tin, oil -> carton,
+// everything else -> balti/bucket).
+type IconKind = "tin" | "carton" | "balti" | "bottle" | "soap";
+
+function getIconKind(item: Item): IconKind {
+  const n = item.name.toLowerCase();
+  if (n.includes("rso")) return "bottle";
+  if (n.includes("soap")) return "soap";
+  if (item.type === "ghee") return "tin";
+  if (item.type === "oil") return "carton";
+  return "balti";
+}
+
 export default function BookPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [towns, setTowns] = useState<Town[]>([]);
@@ -221,7 +235,7 @@ export default function BookPage() {
                     <td>
                       <div className={styles.itemCell}>
                         <span className={styles.itemIcon}>
-                          <ProductIcon type={item.type} />
+                          <ProductIcon kind={getIconKind(item)} />
                         </span>
                         {item.name}
                       </div>
@@ -299,7 +313,7 @@ function Header() {
 
 function SettingsIcon() {
   return (
-    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
@@ -314,48 +328,52 @@ function CheckIcon() {
   );
 }
 
-// Container-accurate glyphs: ghee items are packed in tins, oil items
-// in cartons/packs, everything else ("other") in a balti (bucket).
-// Each icon sits in a small bordered box (see .itemIcon) so it reads
-// as a distinct little badge next to the item name.
-function ProductIcon({ type }: { type: "ghee" | "oil" | "other" }) {
-  if (type === "ghee") {
-    // Tin
+// Five visually distinct container glyphs. Tin is a straight-sided
+// cylinder (two rim ellipses + vertical sides); balti is a tapered
+// trapezoid with a handle — they no longer share a silhouette.
+function ProductIcon({ kind }: { kind: IconKind }) {
+  if (kind === "tin") {
     return (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-        <path
-          d="M6 7.5 6.9 19.6a1.4 1.4 0 0 0 1.4 1.3h7.4a1.4 1.4 0 0 0 1.4-1.3L18 7.5z"
-          fill="#F6C90E"
-          stroke="#0B2B5B"
-          strokeWidth="1.4"
-        />
-        <ellipse cx="12" cy="7.5" rx="6" ry="1.9" fill="#FDE58A" stroke="#0B2B5B" strokeWidth="1.4" />
-        <path d="M8.3 7.4V6.1a1 1 0 0 1 1-1h5.4a1 1 0 0 1 1 1v1.3" stroke="#0B2B5B" strokeWidth="1.1" fill="none" />
-        <path d="M6.6 12.5c1.6.7 9.2.7 10.8 0" stroke="#0B2B5B" strokeWidth="0.8" opacity="0.35" fill="none" />
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+        <path d="M6.5 8.2v10.6c0 1.2 2.46 2.2 5.5 2.2s5.5-1 5.5-2.2V8.2" fill="#F6C90E" stroke="#0B2B5B" strokeWidth="1.4" />
+        <ellipse cx="12" cy="8.2" rx="5.5" ry="1.9" fill="#FDE58A" stroke="#0B2B5B" strokeWidth="1.4" />
+        <ellipse cx="12" cy="5.3" rx="2.4" ry="0.9" fill="#0B2B5B" />
+        <path d="M6.5 13c1.8.8 9.2.8 11 0" stroke="#0B2B5B" strokeWidth="0.8" opacity="0.3" fill="none" />
       </svg>
     );
   }
-  if (type === "oil") {
-    // Carton / pack
+  if (kind === "carton") {
     return (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
         <path d="M4 8.5 12 5l8 3.5v9L12 21 4 17.5z" fill="#FDE9A8" stroke="#D62828" strokeWidth="1.4" />
         <path d="M4 8.5 12 12l8-3.5M12 12v9" stroke="#D62828" strokeWidth="1.3" fill="none" />
         <path d="M7.7 6.8 15.7 10.3" stroke="#0B2B5B" strokeWidth="1" opacity="0.5" />
       </svg>
     );
   }
-  // Balti (bucket)
+  if (kind === "bottle") {
+    return (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+        <path d="M10 2.5h4v3.1l1.6 2.4c.4.6.6 1.3.6 2V19a2.5 2.5 0 0 1-2.5 2.5h-3.4A2.5 2.5 0 0 1 7.8 19v-9c0-.7.2-1.4.6-2L10 5.6V2.5z" fill="#CFE8E0" stroke="#0B2B5B" strokeWidth="1.4" />
+        <rect x="9.6" y="1.4" width="4.8" height="1.6" rx="0.4" fill="#0B2B5B" />
+        <rect x="8.2" y="11.5" width="7.6" height="5" fill="#1B8A6B" opacity="0.75" />
+      </svg>
+    );
+  }
+  if (kind === "soap") {
+    return (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+        <rect x="3.5" y="8.5" width="17" height="9" rx="4" fill="#F7D9E6" stroke="#0B2B5B" strokeWidth="1.4" />
+        <path d="M7 10.8c3.5 1.6 6.5 1.6 10 0" stroke="#0B2B5B" strokeWidth="1" opacity="0.45" fill="none" />
+      </svg>
+    );
+  }
+  // balti (bucket) — trapezoid + handle, wider at the top
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <path
-        d="M6.5 8h11l-1.3 10.2a1.8 1.8 0 0 1-1.78 1.6H9.58a1.8 1.8 0 0 1-1.78-1.6L6.5 8z"
-        fill="#e2e5ea"
-        stroke="#0B2B5B"
-        strokeWidth="1.4"
-      />
-      <path d="M5.5 8h13" stroke="#0B2B5B" strokeWidth="1.4" />
-      <path d="M8.5 8c0-3 1.5-4.6 3.5-4.6S15.5 5 15.5 8" stroke="#0B2B5B" strokeWidth="1.3" fill="none" />
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path d="M5 7.5h14l-2 11.2a1.6 1.6 0 0 1-1.58 1.3H8.58A1.6 1.6 0 0 1 7 18.7L5 7.5z" fill="#DCE1E8" stroke="#0B2B5B" strokeWidth="1.4" />
+      <path d="M4 7.5h16" stroke="#0B2B5B" strokeWidth="1.4" />
+      <path d="M7.5 7.5c0-2.6 2-4 4.5-4s4.5 1.4 4.5 4" stroke="#0B2B5B" strokeWidth="1.3" fill="none" />
     </svg>
   );
 }
