@@ -36,7 +36,13 @@ export async function POST(req: NextRequest) {
 
   const { data, error } = await supabaseServer
     .from("towns")
-    .insert({ name: body.name.trim(), sort_order: sortOrder, is_active: body.is_active ?? true })
+    .insert({
+      name: body.name.trim(),
+      group_no: body.group_no ?? null,
+      upc: body.upc ?? null,
+      sort_order: sortOrder,
+      is_active: body.is_active ?? true,
+    })
     .select()
     .single();
 

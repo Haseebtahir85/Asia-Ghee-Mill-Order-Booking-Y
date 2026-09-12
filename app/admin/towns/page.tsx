@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react";
 import { Town } from "@/lib/types";
 
+const emptyForm = { name: "", group_no: "", upc: "" };
+
 export default function AdminTownsPage() {
   const [towns, setTowns] = useState<Town[]>([]);
   const [loading, setLoading] = useState(true);
-  const [name, setName] = useState("");
+  const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
 
   async function loadTowns() {
@@ -25,7 +27,7 @@ export default function AdminTownsPage() {
     e.preventDefault();
     setError(null);
 
-    if (!name.trim()) {
+    if (!form.name.trim()) {
       setError("Town name is required.");
       return;
     }
@@ -33,7 +35,11 @@ export default function AdminTownsPage() {
     const res = await fetch("/api/admin/towns", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({
+        name: form.name,
+        group_no: form.group_no ? parseInt(form.group_no, 10) : null,
+        upc: form.upc || null,
+      }),
     });
 
     if (!res.ok) {
@@ -42,7 +48,7 @@ export default function AdminTownsPage() {
       return;
     }
 
-    setName("");
+    setForm(emptyForm);
     loadTowns();
   }
 
@@ -75,14 +81,16 @@ export default function AdminTownsPage() {
   }
 
   return (
-    <main style={{ maxWidth: 600, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
+    <main style={{ maxWidth: 700, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
       <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 16 }}>Towns</h1>
       <p style={{ color: "#666", fontSize: 13, marginBottom: 16 }}>
         This list fills the Town dropdown on the public booking page.
       </p>
 
-      <form onSubmit={addTown} style={{ display: "flex", gap: 10, marginBottom: 24 }}>
-        <input placeholder="Town name" value={name} onChange={(e) => setName(e.target.value)} style={{ flex: 1 }} />
+      <form onSubmit={addTown} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 10, marginBottom: 24 }}>
+        <input placeholder="Town name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
+        <input placeholder="Group No" type="number" value={form.group_no} onChange={(e) => setForm({ ...form, group_no: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
+        <input placeholder="Code" value={form.upc} onChange={(e) => setForm({ ...form, upc: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
         <button type="submit" style={buttonStyle}>Add</button>
       </form>
 
@@ -91,12 +99,23 @@ export default function AdminTownsPage() {
       {loading ? (
         <p>Loading...</p>
       ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", minWidth: 560, borderCollapse: "collapse" }}>
+          <colgroup>
+            <col style={{ width: 46 }} />
+            <col style={{ minWidth: 180 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 70 }} />
+          </colgroup>
           <thead>
             <tr style={{ textAlign: "left", borderBottom: "2px solid #ddd" }}>
               <th style={thStyle}></th>
               <th style={thStyle}>Name</th>
-              <th style={thStyle}>Active</th>
+              <th style={thStyle}>Group No</th>
+              <th style={thStyle}>Code</th>
+              <th style={thStyle}>Status</th>
               <th style={thStyle}></th>
             </tr>
           </thead>
@@ -111,11 +130,44 @@ export default function AdminTownsPage() {
                   <input
                     defaultValue={town.name}
                     onBlur={(e) => e.target.value !== town.name && updateTown(town.id, { name: e.target.value })}
-                    style={{ width: "100%", border: "1px solid transparent", padding: 4 }}
+                    style={{ width: "100%", minWidth: 160, border: "1px solid transparent", padding: 4, boxSizing: "border-box" }}
                   />
                 </td>
                 <td style={tdStyle}>
-                  <input type="checkbox" checked={town.is_active} onChange={(e) => updateTown(town.id, { is_active: e.target.checked })} />
+                  <input
+                    type="number"
+                    defaultValue={town.group_no ?? ""}
+                    onBlur={(e) => {
+                      const value = e.target.value === "" ? null : parseInt(e.target.value, 10);
+                      if (value !== (town.group_no ?? null)) updateTown(town.id, { group_no: value });
+                    }}
+                    style={{ width: "100%", border: "1px solid transparent", padding: 4, boxSizing: "border-box" }}
+                  />
+                </td>
+                <td style={tdStyle}>
+                  <input
+                    defaultValue={town.upc ?? ""}
+                    onBlur={(e) => e.target.value !== (town.upc ?? "") && updateTown(town.id, { upc: e.target.value || null })}
+                    style={{ width: "100%", border: "1px solid transparent", padding: 4, boxSizing: "border-box" }}
+                  />
+                </td>
+                <td style={tdStyle}>
+                  <button
+                    type="button"
+                    onClick={() => updateTown(town.id, { is_active: !town.is_active })}
+                    style={{
+                      padding: "4px 10px",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      border: "none",
+                      borderRadius: 12,
+                      cursor: "pointer",
+                      color: town.is_active ? "#1b8a3d" : "#888",
+                      background: town.is_active ? "#e6f4ea" : "#eee",
+                    }}
+                  >
+                    {town.is_active ? "Active" : "Inactive"}
+                  </button>
                 </td>
                 <td style={tdStyle}>
                   <button onClick={() => deleteTown(town.id)} style={{ ...moveButtonStyle, color: "#b00020" }}>Delete</button>
@@ -124,6 +176,7 @@ export default function AdminTownsPage() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </main>
   );
