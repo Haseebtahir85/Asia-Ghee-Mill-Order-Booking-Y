@@ -238,8 +238,8 @@ export default function AdminItemsPage() {
 
       <form onSubmit={addItem} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 24, padding: 14, border: "1px solid #ddd", borderRadius: 8 }}>
         <input placeholder="Item name (e.g. 1 Kg 12 Pack)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
-        <input type="number" step="0.01" placeholder="Weight (kg)" value={form.weight_kg} onChange={(e) => setForm({ ...form, weight_kg: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
-        <input type="number" step="0.01" placeholder="Rate" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
+        <input type="number" step="1" placeholder="Weight (kg)" value={form.weight_kg} onChange={(e) => setForm({ ...form, weight_kg: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
+        <input type="number" step="1" placeholder="Rate" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
         <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as ItemType })} style={{ minWidth: 0, width: "100%" }}>
           <option value="ghee">Ghee</option>
           <option value="oil">Oil</option>
@@ -295,7 +295,7 @@ export default function AdminItemsPage() {
                 <td style={tdStyle}>
                   <input
                     type="number"
-                    step="0.01"
+                    step="1"
                     defaultValue={item.weight_kg}
                     onBlur={(e) => parseFloat(e.target.value) !== item.weight_kg && updateItem(item.id, { weight_kg: parseFloat(e.target.value) })}
                     style={{ width: 80, border: "1px solid transparent", padding: 4 }}
@@ -304,7 +304,7 @@ export default function AdminItemsPage() {
                 <td style={tdStyle}>
                   <input
                     type="number"
-                    step="0.01"
+                    step="1"
                     defaultValue={item.rate}
                     onBlur={(e) => parseFloat(e.target.value) !== item.rate && updateItem(item.id, { rate: parseFloat(e.target.value) })}
                     style={{ width: 90, border: "1px solid transparent", padding: 4 }}
