@@ -9,12 +9,19 @@ const nextConfig = {
     // entirely for this package: Node's own require() loads it directly
     // from node_modules at runtime, where that resolution works natively.
     serverComponentsExternalPackages: ["pdfkit"],
-    // Belt-and-suspenders: also make sure the actual .afm font data files
-    // (non-code assets pdfkit reads from disk) are included in these two
-    // routes' deployed function bundles.
+    // Belt-and-suspenders: also make sure the actual non-code font data
+    // files pdfkit reads from disk are included in these two routes'
+    // deployed function bundles — both the newer #standard-fonts/*.cjs
+    // files (the ones actually used at runtime) and the legacy .afm data.
     outputFileTracingIncludes: {
-      "/api/admin/orders/export": ["./node_modules/pdfkit/js/data/**/*"],
-      "/api/admin/orders/export-new": ["./node_modules/pdfkit/js/data/**/*"],
+      "/api/admin/orders/export": [
+        "./node_modules/pdfkit/js/standard-fonts/**/*",
+        "./node_modules/pdfkit/js/data/**/*",
+      ],
+      "/api/admin/orders/export-new": [
+        "./node_modules/pdfkit/js/standard-fonts/**/*",
+        "./node_modules/pdfkit/js/data/**/*",
+      ],
     },
   },
 };
