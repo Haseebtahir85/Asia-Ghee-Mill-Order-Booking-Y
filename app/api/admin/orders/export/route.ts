@@ -2,8 +2,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import JSZip from "jszip";
 import { supabaseServer } from "@/lib/supabase";
-import { buildOrdersWorkbook, fetchWorkbookLookups } from "@/lib/ordersWorkbook";
-import { buildOrdersPdf } from "@/lib/ordersPdf";
+import { buildSoftCopyWorkbook, fetchWorkbookLookups } from "@/lib/ordersWorkbook";
+import { buildOrderBookPdf } from "@/lib/ordersPdf";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
@@ -27,15 +27,16 @@ export async function POST(req: NextRequest) {
     }
 
     const { catalogItems, discountByTownId } = await fetchWorkbookLookups(supabaseServer, orders);
-    const itemNumberById = new Map(catalogItems.map((it: any) => [it.id, it.item_number ?? null]));
+    const itemNumberById = new Map<string, string | null>(catalogItems.map((it: any) => [it.id, it.item_number ?? null] as [string, string | null]));
+    const catalogWeightById = new Map<string, number>(catalogItems.map((it: any) => [it.id, it.weight_kg] as [string, number]));
 
-    const workbook = buildOrdersWorkbook(orders, catalogItems, discountByTownId);
+    const pdfBuffer = await buildOrderBookPdf(orders, catalogWeightById, discountByTownId);
+    const workbook = buildSoftCopyWorkbook(orders, itemNumberById);
     const xlsxBuffer = await workbook.xlsx.writeBuffer();
-    const pdfBuffer = await buildOrdersPdf(orders, itemNumberById);
 
     const zip = new JSZip();
-    zip.file("Order Book.xlsx", xlsxBuffer);
-    zip.file("Soft copy.pdf", pdfBuffer);
+    zip.file("Order Book.pdf", pdfBuffer);
+    zip.file("Soft copy.xlsx", xlsxBuffer);
     const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
 
     const zipName = orders.length === 1 ? `order-${orders[0].order_number}.zip` : `orders-export-${orders.length}.zip`;
@@ -48,8 +49,6 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (err: any) {
-    // Surface the real failure instead of an opaque 500 — e.g. this is
-    // where a pdfkit font-loading issue on the server would show up.
     console.error("orders export failed:", err);
     return NextResponse.json({ error: err?.message ?? "Export failed unexpectedly" }, { status: 500 });
   }
