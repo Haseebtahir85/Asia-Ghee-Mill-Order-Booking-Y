@@ -1,6 +1,5 @@
 // Destination: app/api/admin/orders/export-new/route.ts
 import { NextResponse } from "next/server";
-import JSZip from "jszip";
 import { supabaseServer } from "@/lib/supabase";
 import { buildSoftCopyWorkbook, fetchWorkbookLookups } from "@/lib/ordersWorkbook";
 import { buildOrderBookPdf } from "@/lib/ordersPdf";
@@ -10,6 +9,10 @@ import { buildOrderBookPdf } from "@/lib/ordersPdf";
 // newest order just exported. The marker lives in admin_settings (a
 // single row), not in the browser, so it's consistent across devices
 // and admins rather than per-browser/localStorage.
+//
+// Returns both files as separate base64 payloads in one JSON response —
+// NOT zipped together — so the client can trigger two independent
+// downloads (Order Book.pdf and Soft copy.xlsx).
 export async function POST() {
   try {
     const { data: settings, error: settingsError } = await supabaseServer
@@ -43,16 +46,13 @@ export async function POST() {
     }
 
     const { catalogItems, discountByTownId } = await fetchWorkbookLookups(supabaseServer, orders);
-    const itemNumberById = new Map<string, string | null>(catalogItems.map((it: any) => [it.id, it.item_number ?? null] as [string, string | null]));
+    const itemNumberById = new Map<string, string | null>(
+      catalogItems.map((it: any) => [it.id, it.item_number ?? null] as [string, string | null])
+    );
 
     const pdfBuffer = await buildOrderBookPdf(orders, catalogItems, discountByTownId);
     const workbook = buildSoftCopyWorkbook(orders, itemNumberById);
     const xlsxBuffer = await workbook.xlsx.writeBuffer();
-
-    const zip = new JSZip();
-    zip.file("Order Book.pdf", pdfBuffer);
-    zip.file("Soft copy.xlsx", xlsxBuffer);
-    const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
 
     // Advance the marker to the newest order's created_at (not "now") so a
     // slow request can't accidentally skip an order created mid-export.
@@ -63,16 +63,17 @@ export async function POST() {
       .update({ last_order_export_at: newestCreatedAt })
       .eq("id", 1);
 
-    const zipName = `new-orders-${orders.length}.zip`;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${zipName}"`,
-    };
-    if (updateError) {
-      headers["X-Export-Marker-Warning"] = "Failed to update last export marker — next export may repeat these orders";
-    }
-
-    return new NextResponse(new Uint8Array(zipBuffer), { status: 200, headers });
+    return NextResponse.json({
+      pdf: {
+        filename: `Order Book - new-${orders.length}.pdf`,
+        base64: Buffer.from(pdfBuffer).toString("base64"),
+      },
+      xlsx: {
+        filename: `Soft copy - new-${orders.length}.xlsx`,
+        base64: Buffer.from(xlsxBuffer).toString("base64"),
+      },
+      markerWarning: updateError ? "Failed to update last export marker — next export may repeat these orders" : undefined,
+    });
   } catch (err: any) {
     console.error("new orders export failed:", err);
     return NextResponse.json({ error: err?.message ?? "Export failed unexpectedly" }, { status: 500 });

@@ -1,62 +1,49 @@
 // Destination: lib/ordersWorkbook.ts
 import ExcelJS from "exceljs";
 
-// Builds the "Soft copy" workbook — one sheet per order, matching your
-// Soft_copy.xlsx sample: a paired "Order ID" header (two merged cells,
-// same value, side by side) then a lean item table — Item No. / Item /
-// UoM Code / Quantity — listing only the items actually ordered.
-// UoM Code is always "Nos".
-function sanitizeSheetName(name: string): string {
-  return name.replace(/[\[\]:*?/\\]/g, "-").slice(0, 31);
-}
-
-// UoM Code is fixed at "Nos" for every row.
-function uomFor(_name: string): string {
-  return "Nos";
-}
-
+// Builds the "Soft copy" workbook — ONE sheet total, not one per order.
+// Every order's block (an "Order ID" header, then its Item No. / Item /
+// UoM Code / Quantity rows) is stacked one after another down the same
+// sheet, separated by a blank row. UoM Code is always "Nos".
 export function buildSoftCopyWorkbook(orders: any[], itemNumberById: Map<string, string | null>): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "ASIA GHEE MILLS (Pvt.) Ltd.";
   workbook.created = new Date();
 
-  const usedNames = new Set<string>();
+  const sheet = workbook.addWorksheet("Soft Copy");
+  sheet.columns = [{ width: 12 }, { width: 30 }, { width: 14 }, { width: 12 }];
 
+  let row = 1;
   for (const order of orders) {
-    let sheetName = sanitizeSheetName(order.order_number || order.id);
-    let suffix = 2;
-    while (usedNames.has(sheetName)) {
-      sheetName = sanitizeSheetName(`${order.order_number}-${suffix}`);
-      suffix++;
-    }
-    usedNames.add(sheetName);
+    sheet.mergeCells(row, 1, row, 2);
+    const idCellA = sheet.getCell(row, 1);
+    idCellA.value = `Order ID: ${order.order_number}`;
+    idCellA.font = { bold: true, size: 11 };
+    idCellA.alignment = { horizontal: "center" };
 
-    const sheet = workbook.addWorksheet(sheetName);
-    sheet.columns = [{ width: 12 }, { width: 30 }, { width: 14 }, { width: 12 }];
-
-    sheet.mergeCells("A1:B1");
-    sheet.getCell("A1").value = `Order ID: ${order.order_number}`;
-    sheet.getCell("A1").font = { bold: true, size: 11 };
-    sheet.getCell("A1").alignment = { horizontal: "center" };
-
-    sheet.mergeCells("C1:D1");
-    sheet.getCell("C1").value = `Order ID: ${order.order_number}`;
-    sheet.getCell("C1").font = { bold: true, size: 11 };
-    sheet.getCell("C1").alignment = { horizontal: "center" };
+    sheet.mergeCells(row, 3, row, 4);
+    const idCellB = sheet.getCell(row, 3);
+    idCellB.value = `Order ID: ${order.order_number}`;
+    idCellB.font = { bold: true, size: 11 };
+    idCellB.alignment = { horizontal: "center" };
+    row++;
 
     ["Item No.", "Item", "UoM Code", "Quantity"].forEach((h, i) => {
-      const cell = sheet.getCell(2, i + 1);
+      const cell = sheet.getCell(row, i + 1);
       cell.value = h;
       cell.font = { bold: true, size: 14 };
     });
+    row++;
 
-    (order.order_items as any[]).forEach((line, idx) => {
-      const row = sheet.getRow(3 + idx);
-      row.getCell(1).value = itemNumberById.get(line.item_id) || "-";
-      row.getCell(2).value = line.item_name;
-      row.getCell(3).value = uomFor(line.item_name);
-      row.getCell(4).value = line.qty;
-    });
+    for (const line of order.order_items as any[]) {
+      sheet.getCell(row, 1).value = itemNumberById.get(line.item_id) || "-";
+      sheet.getCell(row, 2).value = line.item_name;
+      sheet.getCell(row, 3).value = "Nos";
+      sheet.getCell(row, 4).value = line.qty;
+      row++;
+    }
+
+    row++; // blank separator row between orders
   }
 
   return workbook;

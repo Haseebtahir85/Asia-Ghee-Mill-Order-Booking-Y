@@ -188,7 +188,25 @@ export default function AdminOrdersPage() {
     });
   }
 
-  async function exportOrders(ids: string[], fallbackFilename: string) {
+  // Decodes a base64 payload into a Blob and triggers a browser download
+  // for it. Called twice per export — once for the PDF, once for the
+  // xlsx — since the two files are downloaded separately, not zipped.
+  function downloadBase64(filename: string, base64: string, mimeType: string) {
+    const byteChars = atob(base64);
+    const byteNumbers = new Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+    const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  }
+
+  async function exportOrders(ids: string[]) {
     if (ids.length === 0) return;
     setError(null);
 
@@ -198,35 +216,27 @@ export default function AdminOrdersPage() {
       body: JSON.stringify({ ids }),
     });
 
+    const json = await res.json().catch(() => ({ error: "Export failed" }));
+
     if (!res.ok) {
-      const json = await res.json().catch(() => ({ error: "Export failed" }));
       setError(json.error ?? "Export failed");
       return;
     }
 
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const disposition = res.headers.get("Content-Disposition") ?? "";
-    const match = disposition.match(/filename="(.+)"/);
-    a.href = url;
-    a.download = match ? match[1] : fallbackFilename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
+    downloadBase64(json.pdf.filename, json.pdf.base64, "application/pdf");
+    downloadBase64(json.xlsx.filename, json.xlsx.base64, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   }
 
   async function exportBulk() {
     setExporting(true);
     const ids = selected.size > 0 ? Array.from(selected) : filteredOrders.map((o) => o.id);
-    await exportOrders(ids, "orders-export.zip");
+    await exportOrders(ids);
     setExporting(false);
   }
 
   async function exportOne(order: Order) {
     setExportingId(order.id);
-    await exportOrders([order.id], `order-${order.order_number}.zip`);
+    await exportOrders([order.id]);
     setExportingId(null);
   }
 
@@ -236,9 +246,9 @@ export default function AdminOrdersPage() {
     setNotice(null);
 
     const res = await fetch("/api/admin/orders/export-new", { method: "POST" });
+    const json = await res.json().catch(() => ({ error: "Export failed" }));
 
     if (!res.ok) {
-      const json = await res.json().catch(() => ({ error: "Export failed" }));
       if (res.status === 404) {
         setNotice(json.error ?? "No new orders since the last export.");
       } else {
@@ -248,20 +258,11 @@ export default function AdminOrdersPage() {
       return;
     }
 
-    const warning = res.headers.get("X-Export-Marker-Warning");
-    if (warning) setError(warning);
+    if (json.markerWarning) setError(json.markerWarning);
 
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const disposition = res.headers.get("Content-Disposition") ?? "";
-    const match = disposition.match(/filename="(.+)"/);
-    a.href = url;
-    a.download = match ? match[1] : "new-orders.zip";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
+    downloadBase64(json.pdf.filename, json.pdf.base64, "application/pdf");
+    downloadBase64(json.xlsx.filename, json.xlsx.base64, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
     setExportingNew(false);
     loadOrders();
   }

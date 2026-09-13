@@ -1,10 +1,13 @@
 // Destination: app/api/admin/orders/export/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import JSZip from "jszip";
 import { supabaseServer } from "@/lib/supabase";
 import { buildSoftCopyWorkbook, fetchWorkbookLookups } from "@/lib/ordersWorkbook";
 import { buildOrderBookPdf } from "@/lib/ordersPdf";
 
+// POST /api/admin/orders/export
+// Returns both files as separate base64 payloads in one JSON response —
+// NOT zipped together — so the client can trigger two independent
+// downloads (Order Book.pdf and Soft copy.xlsx).
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const ids: string[] = Array.isArray(body.ids) ? body.ids : [];
@@ -27,24 +30,24 @@ export async function POST(req: NextRequest) {
     }
 
     const { catalogItems, discountByTownId } = await fetchWorkbookLookups(supabaseServer, orders);
-    const itemNumberById = new Map<string, string | null>(catalogItems.map((it: any) => [it.id, it.item_number ?? null] as [string, string | null]));
+    const itemNumberById = new Map<string, string | null>(
+      catalogItems.map((it: any) => [it.id, it.item_number ?? null] as [string, string | null])
+    );
 
     const pdfBuffer = await buildOrderBookPdf(orders, catalogItems, discountByTownId);
     const workbook = buildSoftCopyWorkbook(orders, itemNumberById);
     const xlsxBuffer = await workbook.xlsx.writeBuffer();
 
-    const zip = new JSZip();
-    zip.file("Order Book.pdf", pdfBuffer);
-    zip.file("Soft copy.xlsx", xlsxBuffer);
-    const zipBuffer = await zip.generateAsync({ type: "nodebuffer" });
+    const suffix = orders.length === 1 ? orders[0].order_number : `${orders.length}-orders`;
 
-    const zipName = orders.length === 1 ? `order-${orders[0].order_number}.zip` : `orders-export-${orders.length}.zip`;
-
-    return new NextResponse(new Uint8Array(zipBuffer), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${zipName}"`,
+    return NextResponse.json({
+      pdf: {
+        filename: `Order Book - ${suffix}.pdf`,
+        base64: Buffer.from(pdfBuffer).toString("base64"),
+      },
+      xlsx: {
+        filename: `Soft copy - ${suffix}.xlsx`,
+        base64: Buffer.from(xlsxBuffer).toString("base64"),
       },
     });
   } catch (err: any) {
