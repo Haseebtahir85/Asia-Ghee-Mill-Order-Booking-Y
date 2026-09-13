@@ -5,11 +5,13 @@ import Link from "next/link";
 import { Item, Town } from "@/lib/types";
 import styles from "./book.module.css";
 
-// Jameel Noori Nastaleeq must be registered elsewhere in the project
-// (e.g. via @font-face in globals.css) — this just references it by
-// name with sensible Urdu-capable fallbacks.
+// Jameel Noori Nastaleeq loads via next/font/local (see lib/fonts.ts) and is
+// exposed as the --font-jameel-noori CSS variable on <html> in the root
+// layout. Noto Nastaliq Urdu (also loaded via next/font) is the fallback if
+// that font file is ever missing, before finally falling back to any
+// Nastaliq-capable font already on the device, then generic serif.
 const urduFont: React.CSSProperties = {
-  fontFamily: "'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', serif",
+  fontFamily: "var(--font-jameel-noori), var(--font-noto-nastaliq), 'Noto Nastaliq Urdu', serif",
 };
 
 function townLabel(t: Town): string {
@@ -375,13 +377,17 @@ export default function BookPage() {
             </table>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, padding: "10px 4px 0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, padding: "10px 4px 0" }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: "#0b2b5b" }}>
               Total Amount: {totals.amount.toLocaleString()}
             </span>
-            <span style={{ fontSize: 13, color: "#444", ...urduFont }}>
-              وزن کی تفصیل: گھی {totals.gheeWeight.toFixed(2)} کلوگرام | تیل {totals.oilWeight.toFixed(2)} کلوگرام | آر ایس او {totals.rsoWeight.toFixed(2)} کلوگرام | صابن {totals.soapWeight.toFixed(2)} کلوگرام
-            </span>
+            <div style={{ ...urduFont, fontSize: 13, color: "#444", textAlign: "right" }}>
+              <div style={{ fontWeight: 600, marginBottom: 2 }}>وزن کی تفصیل</div>
+              <div>گھی {totals.gheeWeight.toFixed(2)} کلوگرام</div>
+              <div>تیل {totals.oilWeight.toFixed(2)} کلوگرام</div>
+              <div>آر ایس او {totals.rsoWeight.toFixed(2)} کلوگرام</div>
+              <div>صابن {totals.soapWeight.toFixed(2)} کلوگرام</div>
+            </div>
           </div>
           </div>
         )}
@@ -402,8 +408,8 @@ export default function BookPage() {
         <div style={modalOverlayStyle} onClick={() => setShowQtyModal(false)}>
           <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
             <h2 style={{ fontSize: 17, margin: "0 0 4px", color: "#0b2b5b" }}>Order Quantity</h2>
-            <p style={{ fontSize: 13, color: "#666", margin: "0 0 16px" }}>
-              How many bills should be booked for this same order? Each will get its own order number.
+            <p style={{ fontSize: 14, color: "#666", margin: "0 0 16px", ...urduFont, textAlign: "right" }}>
+              اس ایک ہی آرڈر کے لیے کتنے بل بک کیے جائیں؟
             </p>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               {QTY_OPTIONS.map((n) => (
