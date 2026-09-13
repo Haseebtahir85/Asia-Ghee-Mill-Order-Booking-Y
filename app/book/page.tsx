@@ -1,12 +1,31 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Item, Town } from "@/lib/types";
 import styles from "./book.module.css";
 
 function townLabel(t: Town): string {
   return t.upc ? `${t.name} (${t.upc})` : t.name;
+}
+
+function getPakistanTimeString() {
+  // Always computed against Asia/Karachi, regardless of the device's own timezone/clock settings.
+  const now = new Date();
+  const datePart = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Karachi",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(now);
+  const timePart = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Karachi",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  }).format(now);
+  return `${datePart}, ${timePart} PKT`;
 }
 
 // Icon is the admin's explicit choice (item.icon) when one is set.
@@ -39,12 +58,22 @@ export default function BookPage() {
   const [qtys, setQtys] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [customerName, setCustomerName] = useState("");
   const [townId, setTownId] = useState("");
   const [townQuery, setTownQuery] = useState("");
+  const [townSuggestions, setTownSuggestions] = useState<Town[]>([]);
+  const [showTownDropdown, setShowTownDropdown] = useState(false);
+  const townBoxRef = useRef<HTMLDivElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmedOrderNumber, setConfirmedOrderNumber] = useState<string | null>(null);
+
+  // Read-only Pakistan Standard Time clock (not derived from the device's local time zone)
+  const [pkTime, setPkTime] = useState(getPakistanTimeString());
+
+  useEffect(() => {
+    const interval = setInterval(() => setPkTime(getPakistanTimeString()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     async function load() {
@@ -63,6 +92,17 @@ export default function BookPage() {
       }
     }
     load();
+  }, []);
+
+  // Close the town dropdown when clicking outside it
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (townBoxRef.current && !townBoxRef.current.contains(e.target as Node)) {
+        setShowTownDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   // Rate and per-unit weight are fetched but never rendered — they're
@@ -96,14 +136,30 @@ export default function BookPage() {
     setQtys((prev) => ({ ...prev, [itemId]: value }));
   }
 
+  function handleTownInputChange(value: string) {
+    setTownQuery(value);
+    setTownId("");
+    if (!value.trim()) {
+      setTownSuggestions([]);
+      setShowTownDropdown(false);
+      return;
+    }
+    const lower = value.toLowerCase();
+    const matches = towns.filter((t) => townLabel(t).toLowerCase().includes(lower)).slice(0, 8);
+    setTownSuggestions(matches);
+    setShowTownDropdown(true);
+  }
+
+  function selectTown(t: Town) {
+    setTownQuery(townLabel(t));
+    setTownId(t.id);
+    setShowTownDropdown(false);
+  }
+
   async function submitOrder(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
-    if (!customerName.trim()) {
-      setError("Customer name is required.");
-      return;
-    }
     if (!townId) {
       setError("Please select a town.");
       return;
@@ -120,7 +176,6 @@ export default function BookPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        customer_name: customerName,
         town_id: townId,
         lines,
       }),
@@ -141,7 +196,7 @@ export default function BookPage() {
     return (
       <div className={styles.page}>
       <main className={styles.wrapper}>
-        <Header />
+        <Header pkTime={pkTime} />
         <div className={styles.confirmCard}>
           <div className={styles.confirmIcon}>
             <CheckIcon />
@@ -155,7 +210,6 @@ export default function BookPage() {
             onClick={() => {
               setConfirmedOrderNumber(null);
               setQtys({});
-              setCustomerName("");
               setTownId("");
               setTownQuery("");
             }}
@@ -171,39 +225,33 @@ export default function BookPage() {
   return (
     <div className={styles.page}>
     <main className={styles.wrapper}>
-      <Header />
+      <Header pkTime={pkTime} />
 
       <form onSubmit={submitOrder}>
         <div className={styles.card}>
           <div className={styles.fieldGrid}>
-            <div>
-              <label className={styles.fieldLabel}>Customer Name</label>
-              <input
-                className={styles.input}
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                placeholder="e.g. Malik Traders"
-              />
-            </div>
-            <div>
+            <div style={{ gridColumn: "1 / -1" }} ref={townBoxRef}>
               <label className={styles.fieldLabel}>Town</label>
-              <input
-                className={styles.select}
-                list="town-options"
-                placeholder="Type to search towns..."
-                value={townQuery}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setTownQuery(value);
-                  const match = towns.find((t) => townLabel(t) === value);
-                  setTownId(match ? match.id : "");
-                }}
-              />
-              <datalist id="town-options">
-                {towns.map((t) => (
-                  <option key={t.id} value={townLabel(t)} />
-                ))}
-              </datalist>
+              <div style={{ position: "relative" }}>
+                <input
+                  className={styles.select}
+                  style={{ width: "100%" }}
+                  placeholder="Type to search towns..."
+                  value={townQuery}
+                  onChange={(e) => handleTownInputChange(e.target.value)}
+                  onFocus={() => townSuggestions.length > 0 && setShowTownDropdown(true)}
+                  autoComplete="off"
+                />
+                {showTownDropdown && townSuggestions.length > 0 && (
+                  <ul style={dropdownStyle}>
+                    {townSuggestions.map((t) => (
+                      <li key={t.id} onClick={() => selectTown(t)} style={dropdownItemStyle}>
+                        {townLabel(t)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -310,7 +358,7 @@ export default function BookPage() {
   );
 }
 
-function Header() {
+function Header({ pkTime }: { pkTime: string }) {
   return (
     <div className={styles.hero}>
       <div className={styles.logoRow}>
@@ -322,9 +370,12 @@ function Header() {
         </div>
       </div>
 
-      <Link href="/admin" title="Admin panel" aria-label="Open admin panel" className={styles.gearBtn}>
-        <SettingsIcon />
-      </Link>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <span style={{ fontSize: 12, color: "#666", fontVariantNumeric: "tabular-nums" }}>{pkTime}</span>
+        <Link href="/admin" title="Admin panel" aria-label="Open admin panel" className={styles.gearBtn}>
+          <SettingsIcon />
+        </Link>
+      </div>
     </div>
   );
 }
@@ -400,3 +451,27 @@ function ProductIcon({ kind }: { kind: IconKind }) {
     </svg>
   );
 }
+
+const dropdownStyle: React.CSSProperties = {
+  position: "absolute",
+  top: "calc(100% + 4px)",
+  left: 0,
+  right: 0,
+  maxHeight: 240,
+  overflowY: "auto",
+  background: "#fff",
+  border: "1px solid #ddd",
+  borderRadius: 8,
+  boxShadow: "0 4px 14px rgba(0,0,0,0.1)",
+  listStyle: "none",
+  margin: 0,
+  padding: 4,
+  zIndex: 20,
+};
+
+const dropdownItemStyle: React.CSSProperties = {
+  padding: "8px 10px",
+  fontSize: 14,
+  cursor: "pointer",
+  borderRadius: 6,
+};
