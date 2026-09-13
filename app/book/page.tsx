@@ -360,6 +360,7 @@ export default function BookPage() {
           type="submit"
           disabled={submitting || loading || !!loadError || items.length === 0}
           className={styles.submitBtn}
+          style={{ width: "100%", display: "block" }}
         >
           {submitting ? "Booking..." : "Book Order"}
         </button>
