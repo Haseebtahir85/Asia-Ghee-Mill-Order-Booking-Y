@@ -496,7 +496,7 @@ export default function BookPage() {
           className={styles.submitBtn}
           style={{ width: "100%", display: "block", ...urduFont }}
         >
-          {submitting ? "بک ہو رہا ہے..." : "ابھی بک کریں"}
+          {submitting ? "بک ہو رہا ہے..." : " بک کریں"}
         </button>
       </form>
 
