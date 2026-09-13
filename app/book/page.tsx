@@ -289,7 +289,7 @@ export default function BookPage() {
   if (confirmedOrderNumbers) {
     return (
       <div className={styles.page} style={{ overflowX: "hidden" }}>
-      <main className={styles.wrapper}>
+      <main className={styles.wrapper} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
         <Header />
         <div className={styles.confirmCard}>
           <div className={styles.confirmIcon}>
@@ -325,7 +325,7 @@ export default function BookPage() {
 
   return (
     <div className={styles.page} style={{ overflowX: "hidden" }}>
-    <main className={styles.wrapper}>
+    <main className={styles.wrapper} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
       <Header />
 
       <form onSubmit={openQtyModal}>
