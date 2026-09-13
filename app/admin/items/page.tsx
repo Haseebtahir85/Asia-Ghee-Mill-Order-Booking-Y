@@ -3,6 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Item, ItemType, IconKind } from "@/lib/types";
 
+const NAVY = "#0b2b5b";
+const YELLOW = "#F6C90E";
+const RED = "#D62828";
+
 const ICON_OPTIONS: { value: IconKind; label: string }[] = [
   { value: "tin", label: "Tin" },
   { value: "pack", label: "Pack / Carton" },
@@ -10,6 +14,9 @@ const ICON_OPTIONS: { value: IconKind; label: string }[] = [
   { value: "bottle", label: "Bottle" },
   { value: "soap", label: "Soap" },
 ];
+
+const VALID_TYPES: ItemType[] = ["ghee", "oil", "other"];
+const VALID_ICONS: IconKind[] = ["tin", "pack", "bucket", "bottle", "soap"];
 
 const emptyForm = {
   name: "",
@@ -19,6 +26,40 @@ const emptyForm = {
   icon: "tin" as IconKind,
   item_number: "",
   sku_number: "",
+};
+
+// Excel column headers, in the exact order written and read back. ID is
+// used to match rows back to items — matching by name alone can't survive
+// a rename. A row with no ID and no matching name is a brand-new item.
+const EXCEL_HEADERS = ["ID", "Name", "Item #", "SKU", "Weight (kg)", "Rate", "Type", "Icon", "Active"] as const;
+
+type FieldChange = { field: string; oldValue: string; newValue: string };
+
+// One entry per affected item (existing update OR brand-new creation) —
+// every changed field for that item lives together in one row.
+type ItemChangeGroup = {
+  key: string;
+  itemLabel: string;
+  isNew: boolean;
+  fields: FieldChange[];
+};
+
+type NewItemPayload = {
+  name: string;
+  weight_kg: number;
+  rate: number;
+  type: ItemType;
+  icon: IconKind | null;
+  item_number: string | null;
+  sku_number: string | null;
+  is_active: boolean;
+};
+
+type PendingImport = {
+  patches: { id: string; patch: Partial<Item> }[];
+  creates: NewItemPayload[];
+  groups: ItemChangeGroup[];
+  skipped: number;
 };
 
 // Same five glyphs used on the public /book page, kept in sync so the
@@ -168,12 +209,9 @@ export default function AdminItemsPage() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
+  const [excelStatus, setExcelStatus] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<{
-    updatedCount: number;
-    notFound: string[];
-    skippedNoValues: string[];
-  } | null>(null);
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function loadItems() {
@@ -187,34 +225,6 @@ export default function AdminItemsPage() {
   useEffect(() => {
     loadItems();
   }, []);
-
-  async function handleExcelFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-selecting the same file next time
-    if (!file) return;
-
-    setImporting(true);
-    setImportResult(null);
-    setError(null);
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const res = await fetch("/api/admin/items/bulk-update", {
-      method: "POST",
-      body: formData,
-    });
-    const json = await res.json().catch(() => ({}));
-    setImporting(false);
-
-    if (!res.ok) {
-      setError(json.error ?? "Failed to update from file");
-      return;
-    }
-
-    setImportResult(json);
-    loadItems();
-  }
 
   async function addItem(e: React.FormEvent) {
     e.preventDefault();
@@ -277,52 +287,293 @@ export default function AdminItemsPage() {
     });
   }
 
+  // Builds an .xlsx of the current catalog so the admin can edit values in
+  // Excel and re-upload it. The ID column is used to match rows back to
+  // items — don't edit or remove it. Leave ID blank on a new row to add a
+  // brand-new item.
+  async function downloadTemplate() {
+    const XLSX = await import("xlsx");
+    const rows = items.map((it) => ({
+      ID: it.id,
+      Name: it.name,
+      "Item #": it.item_number ?? "",
+      SKU: it.sku_number ?? "",
+      "Weight (kg)": it.weight_kg,
+      Rate: it.rate,
+      Type: it.type,
+      Icon: it.icon ?? "",
+      Active: it.is_active ? "Active" : "Inactive",
+    }));
+    const sheet = XLSX.utils.json_to_sheet(rows, { header: [...EXCEL_HEADERS] });
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Items");
+    XLSX.writeFile(workbook, "items-template.xlsx");
+  }
+
+  function triggerExcelUpload() {
+    fileInputRef.current?.click();
+  }
+
+  async function applyPatches(patches: { id: string; patch: Partial<Item> }[]) {
+    for (const { id, patch } of patches) {
+      await fetch(`/api/admin/items/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+    }
+  }
+
+  async function applyCreates(creates: NewItemPayload[]) {
+    for (const payload of creates) {
+      await fetch("/api/admin/items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    }
+  }
+
+  // Reads the uploaded workbook, matches each row to an existing item by
+  // ID (falling back to name, case-insensitive, if ID is missing).
+  //
+  // - Matched rows: Name / Item # / SKU / Type / Icon changes are gated —
+  //   held for confirmation. Weight (kg) / Rate / Active changes apply
+  //   directly and are never shown in the popup.
+  // - Unmatched rows with a name AND both weight and rate present:
+  //   treated as a brand-new item to create (also shown in the popup).
+  // - Unmatched rows missing a name, or missing weight/rate (required,
+  //   non-nullable columns): skipped.
+  //
+  // Cancel applies nothing at all, including Weight/Rate/Active changes
+  // riding along in the same upload.
+  async function handleExcelFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setImporting(true);
+    setExcelStatus(null);
+    setError(null);
+
+    try {
+      const XLSX = await import("xlsx");
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet);
+
+      const byId = new Map(items.map((it) => [it.id, it]));
+      const byLowerName = new Map(items.map((it) => [it.name.trim().toLowerCase(), it]));
+
+      const patches: { id: string; patch: Partial<Item> }[] = [];
+      const creates: NewItemPayload[] = [];
+      const groupsByKey = new Map<string, ItemChangeGroup>();
+      let skipped = 0;
+
+      const toNum = (v: unknown): number | null => {
+        if (v === undefined || v === null || v === "") return null;
+        const n = Number(String(v).replace(/,/g, "").trim());
+        return Number.isFinite(n) ? n : null;
+      };
+
+      rows.forEach((row, index) => {
+        const rowId = String(row["ID"] ?? row["id"] ?? "").trim();
+        const rawName = String(row["Name"] ?? row["name"] ?? "").trim();
+        const match = rowId ? byId.get(rowId) : rawName ? byLowerName.get(rawName.toLowerCase()) : undefined;
+
+        const itemNoRaw = row["Item #"] ?? row["item_number"] ?? row["Item Number"];
+        const skuRaw = row["SKU"] ?? row["sku_number"] ?? row["sku"];
+        const weightRaw = row["Weight (kg)"] ?? row["weight_kg"] ?? row["Weight"];
+        const rateRaw = row["Rate"] ?? row["rate"] ?? row["Price"];
+        const typeRaw = String(row["Type"] ?? row["type"] ?? "").trim().toLowerCase();
+        const iconRaw = String(row["Icon"] ?? row["icon"] ?? "").trim().toLowerCase();
+        const activeRaw = String(row["Active"] ?? row["active"] ?? row["Status"] ?? "").trim().toLowerCase();
+
+        if (!match) {
+          if (!rawName) {
+            skipped++;
+            return;
+          }
+          const weight_kg = toNum(weightRaw);
+          const rate = toNum(rateRaw);
+          if (weight_kg === null || rate === null) {
+            // Weight and Rate are required, non-nullable columns — can't
+            // create an item without them.
+            skipped++;
+            return;
+          }
+
+          const type: ItemType = VALID_TYPES.includes(typeRaw as ItemType) ? (typeRaw as ItemType) : "other";
+          const icon: IconKind | null = VALID_ICONS.includes(iconRaw as IconKind) ? (iconRaw as IconKind) : null;
+          const item_number = itemNoRaw !== undefined ? String(itemNoRaw).trim() || null : null;
+          const sku_number = skuRaw !== undefined ? String(skuRaw).trim() || null : null;
+          const is_active = activeRaw !== "inactive";
+
+          creates.push({ name: rawName, weight_kg, rate, type, icon, item_number, sku_number, is_active });
+
+          const fields: FieldChange[] = [];
+          if (item_number) fields.push({ field: "Item #", oldValue: "—", newValue: item_number });
+          if (sku_number) fields.push({ field: "SKU", oldValue: "—", newValue: sku_number });
+          fields.push({ field: "Type", oldValue: "—", newValue: type });
+          if (icon) fields.push({ field: "Icon", oldValue: "—", newValue: icon });
+          // Weight/Rate intentionally excluded from what's shown, per the same rule as updates.
+
+          groupsByKey.set(`new:${index}`, { key: `new:${index}`, itemLabel: rawName, isNew: true, fields });
+          return;
+        }
+
+        const patch: Partial<Item> = {};
+        const fields: FieldChange[] = [];
+
+        if (rawName && rawName !== match.name.trim()) {
+          patch.name = rawName;
+          fields.push({ field: "Name", oldValue: match.name, newValue: rawName });
+        }
+
+        if (itemNoRaw !== undefined) {
+          const newItemNo = String(itemNoRaw).trim() || null;
+          if (newItemNo !== (match.item_number ?? null)) {
+            patch.item_number = newItemNo;
+            fields.push({ field: "Item #", oldValue: match.item_number ?? "", newValue: newItemNo ?? "" });
+          }
+        }
+
+        if (skuRaw !== undefined) {
+          const newSku = String(skuRaw).trim() || null;
+          if (newSku !== (match.sku_number ?? null)) {
+            patch.sku_number = newSku;
+            fields.push({ field: "SKU", oldValue: match.sku_number ?? "", newValue: newSku ?? "" });
+          }
+        }
+
+        if (typeRaw && VALID_TYPES.includes(typeRaw as ItemType) && typeRaw !== match.type) {
+          patch.type = typeRaw as ItemType;
+          fields.push({ field: "Type", oldValue: match.type, newValue: typeRaw });
+        }
+
+        if (iconRaw && VALID_ICONS.includes(iconRaw as IconKind) && iconRaw !== (match.icon ?? "")) {
+          patch.icon = iconRaw as IconKind;
+          fields.push({ field: "Icon", oldValue: match.icon ?? "", newValue: iconRaw });
+        }
+
+        // Weight/Rate/Active — excepted from the confirmation gate.
+        const newWeight = toNum(weightRaw);
+        if (newWeight !== null && newWeight !== match.weight_kg) {
+          patch.weight_kg = newWeight;
+        }
+        const newRate = toNum(rateRaw);
+        if (newRate !== null && newRate !== match.rate) {
+          patch.rate = newRate;
+        }
+        if (activeRaw === "active" && !match.is_active) patch.is_active = true;
+        else if (activeRaw === "inactive" && match.is_active) patch.is_active = false;
+
+        if (Object.keys(patch).length > 0) {
+          patches.push({ id: match.id, patch });
+        }
+        if (fields.length > 0) {
+          groupsByKey.set(match.id, { key: match.id, itemLabel: match.name, isNew: false, fields });
+        }
+      });
+
+      const groups = Array.from(groupsByKey.values());
+
+      if (groups.length > 0) {
+        setPendingImport({ patches, creates, groups, skipped });
+        setImporting(false);
+        return;
+      }
+
+      await applyPatches(patches);
+      setExcelStatus(
+        skipped > 0
+          ? `Updated ${patches.length} item${patches.length === 1 ? "" : "s"}, ${skipped} row${skipped === 1 ? "" : "s"} skipped.`
+          : `Updated ${patches.length} item${patches.length === 1 ? "" : "s"}.`
+      );
+      loadItems();
+    } catch (err: any) {
+      setError(err.message || "Failed to read the Excel file.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function confirmOverwrite() {
+    if (!pendingImport) return;
+    setImporting(true);
+    await applyPatches(pendingImport.patches);
+    await applyCreates(pendingImport.creates);
+    const total = pendingImport.patches.length + pendingImport.creates.length;
+    setExcelStatus(
+      pendingImport.skipped > 0
+        ? `Updated ${total} item${total === 1 ? "" : "s"}, ${pendingImport.skipped} row${pendingImport.skipped === 1 ? "" : "s"} skipped.`
+        : `Updated ${total} item${total === 1 ? "" : "s"}.`
+    );
+    setPendingImport(null);
+    setImporting(false);
+    loadItems();
+  }
+
+  function cancelImport() {
+    setPendingImport(null);
+  }
+
+  function formatFields(fields: FieldChange[]): string {
+    return fields.map((f) => `${f.field}: ${f.oldValue || "—"} → ${f.newValue || "—"}`).join(", ");
+  }
+
   return (
-    <main style={{ maxWidth: 950, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0 }}>Items, Weights & Rates</h1>
-        <div>
+    <main style={{ maxWidth: 950, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif", background: "#fffdf5", minHeight: "100vh" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 6, height: 24, background: YELLOW, borderRadius: 3 }} />
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: NAVY, margin: 0 }}>Items, Weights & Rates</h1>
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" onClick={downloadTemplate} style={secondaryButtonStyle}>
+            Download Excel Template
+          </button>
+          <button type="button" onClick={triggerExcelUpload} disabled={importing} style={{ ...buttonStyle, opacity: importing ? 0.7 : 1 }}>
+            {importing ? "Updating..." : "Update Data via Excel"}
+          </button>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".xlsx,.xls,.csv"
+            accept=".xlsx,.xls"
             onChange={handleExcelFile}
             style={{ display: "none" }}
           />
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importing}
-            style={{ ...buttonStyle, background: "#0b2b5b" }}
-          >
-            {importing ? "Updating..." : "Update Data via Excel"}
-          </button>
         </div>
       </div>
 
-      {importResult && (
-        <div style={{ background: "#eef6ee", border: "1px solid #bfe0bf", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13 }}>
-          <div>Updated {importResult.updatedCount} item{importResult.updatedCount === 1 ? "" : "s"} from the file.</div>
-          {importResult.notFound.length > 0 && (
-            <div style={{ marginTop: 4, color: "#7a5a00" }}>
-              Not found in catalog: {importResult.notFound.join(", ")}
-            </div>
-          )}
-          {importResult.skippedNoValues.length > 0 && (
-            <div style={{ marginTop: 4, color: "#7a5a00" }}>
-              No weight/rate value in file for: {importResult.skippedNoValues.join(", ")}
-            </div>
-          )}
+      {excelStatus && (
+        <div style={{ color: NAVY, background: "#eef3fb", border: "1px solid #cddaf0", borderRadius: 6, padding: "6px 10px", marginBottom: 12, fontSize: 13 }}>
+          {excelStatus}
         </div>
       )}
 
-      <form onSubmit={addItem} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 24, padding: 14, border: "1px solid #ddd", borderRadius: 8 }}>
-        <input placeholder="Item name (e.g. 1 Kg 12 Pack)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
-        <input placeholder="Item #" value={form.item_number} onChange={(e) => setForm({ ...form, item_number: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
-        <input placeholder="SKU" value={form.sku_number} onChange={(e) => setForm({ ...form, sku_number: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
-        <input type="number" step="1" placeholder="Weight (kg)" value={form.weight_kg} onChange={(e) => setForm({ ...form, weight_kg: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
-        <input type="number" step="1" placeholder="Rate" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
-        <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as ItemType })} style={{ minWidth: 0, width: "100%" }}>
+      <form
+        onSubmit={addItem}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+          gap: 10,
+          marginBottom: 24,
+          padding: 14,
+          background: "#fff",
+          border: `1px solid ${YELLOW}`,
+          borderRadius: 10,
+          boxShadow: "0 2px 8px rgba(11,43,91,0.06)",
+        }}
+      >
+        <input placeholder="Item name (e.g. 1 Kg 12 Pack)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={inputStyle} />
+        <input placeholder="Item #" value={form.item_number} onChange={(e) => setForm({ ...form, item_number: e.target.value })} style={inputStyle} />
+        <input placeholder="SKU" value={form.sku_number} onChange={(e) => setForm({ ...form, sku_number: e.target.value })} style={inputStyle} />
+        <input type="number" step="1" placeholder="Weight (kg)" value={form.weight_kg} onChange={(e) => setForm({ ...form, weight_kg: e.target.value })} style={inputStyle} />
+        <input type="number" step="1" placeholder="Rate" value={form.rate} onChange={(e) => setForm({ ...form, rate: e.target.value })} style={inputStyle} />
+        <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as ItemType })} style={{ ...inputStyle, padding: "8px 10px" }}>
           <option value="ghee">Ghee</option>
           <option value="oil">Oil</option>
           <option value="other">Other</option>
@@ -331,12 +582,16 @@ export default function AdminItemsPage() {
         <button type="submit" style={buttonStyle}>Add</button>
       </form>
 
-      {error && <div style={{ color: "#b00020", marginBottom: 12 }}>{error}</div>}
+      {error && (
+        <div style={{ color: RED, background: "#fdecec", border: "1px solid #f6c9c9", borderRadius: 6, padding: "6px 10px", marginBottom: 12, fontSize: 13 }}>
+          {error}
+        </div>
+      )}
 
       {loading ? (
         <p>Loading...</p>
       ) : (
-        <div style={{ overflowX: "auto" }}>
+        <div style={{ overflowX: "auto", border: `1px solid ${YELLOW}`, borderRadius: 10, background: "#fff" }}>
         <table style={{ width: "100%", minWidth: 720, borderCollapse: "collapse" }}>
           <colgroup>
             <col style={{ width: 46 }} />
@@ -351,7 +606,7 @@ export default function AdminItemsPage() {
             <col style={{ width: 70 }} />
           </colgroup>
           <thead>
-            <tr style={{ textAlign: "left", borderBottom: "2px solid #ddd" }}>
+            <tr style={{ textAlign: "left", background: NAVY }}>
               <th style={thStyle}></th>
               <th style={thStyle}>Item</th>
               <th style={thStyle}>Item #</th>
@@ -366,7 +621,7 @@ export default function AdminItemsPage() {
           </thead>
           <tbody>
             {items.map((item, index) => (
-              <tr key={item.id} style={{ borderBottom: "1px solid #eee" }}>
+              <tr key={item.id} style={{ borderBottom: `1px solid #f3e6b0` }}>
                 <td style={tdStyle}>
                   <button onClick={() => move(index, -1)} style={moveButtonStyle} title="Move up">↑</button>
                   <button onClick={() => move(index, 1)} style={moveButtonStyle} title="Move down">↓</button>
@@ -375,21 +630,27 @@ export default function AdminItemsPage() {
                   <input
                     defaultValue={item.name}
                     onBlur={(e) => e.target.value !== item.name && updateItem(item.id, { name: e.target.value })}
-                    style={{ width: "100%", minWidth: 180, border: "1px solid transparent", padding: 4, boxSizing: "border-box" }}
+                    style={{ width: "100%", minWidth: 180, border: "1px solid transparent", padding: 4, boxSizing: "border-box", borderRadius: 4 }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = YELLOW)}
+                    onBlurCapture={(e) => (e.currentTarget.style.borderColor = "transparent")}
                   />
                 </td>
                 <td style={tdStyle}>
                   <input
                     defaultValue={item.item_number ?? ""}
                     onBlur={(e) => e.target.value !== (item.item_number ?? "") && updateItem(item.id, { item_number: e.target.value || null })}
-                    style={{ width: "100%", border: "1px solid transparent", padding: 4, boxSizing: "border-box" }}
+                    style={{ width: "100%", border: "1px solid transparent", padding: 4, boxSizing: "border-box", borderRadius: 4 }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = YELLOW)}
+                    onBlurCapture={(e) => (e.currentTarget.style.borderColor = "transparent")}
                   />
                 </td>
                 <td style={tdStyle}>
                   <input
                     defaultValue={item.sku_number ?? ""}
                     onBlur={(e) => e.target.value !== (item.sku_number ?? "") && updateItem(item.id, { sku_number: e.target.value || null })}
-                    style={{ width: "100%", border: "1px solid transparent", padding: 4, boxSizing: "border-box" }}
+                    style={{ width: "100%", border: "1px solid transparent", padding: 4, boxSizing: "border-box", borderRadius: 4 }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = YELLOW)}
+                    onBlurCapture={(e) => (e.currentTarget.style.borderColor = "transparent")}
                   />
                 </td>
                 <td style={tdStyle}>
@@ -398,7 +659,9 @@ export default function AdminItemsPage() {
                     step="1"
                     defaultValue={item.weight_kg}
                     onBlur={(e) => parseFloat(e.target.value) !== item.weight_kg && updateItem(item.id, { weight_kg: parseFloat(e.target.value) })}
-                    style={{ width: 80, border: "1px solid transparent", padding: 4 }}
+                    style={{ width: 80, border: "1px solid transparent", padding: 4, borderRadius: 4 }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = YELLOW)}
+                    onBlurCapture={(e) => (e.currentTarget.style.borderColor = "transparent")}
                   />
                 </td>
                 <td style={tdStyle}>
@@ -407,7 +670,9 @@ export default function AdminItemsPage() {
                     step="1"
                     defaultValue={item.rate}
                     onBlur={(e) => parseFloat(e.target.value) !== item.rate && updateItem(item.id, { rate: parseFloat(e.target.value) })}
-                    style={{ width: 90, border: "1px solid transparent", padding: 4 }}
+                    style={{ width: 90, border: "1px solid transparent", padding: 4, borderRadius: 4 }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = YELLOW)}
+                    onBlurCapture={(e) => (e.currentTarget.style.borderColor = "transparent")}
                   />
                 </td>
                 <td style={tdStyle}>
@@ -424,7 +689,7 @@ export default function AdminItemsPage() {
                   <input type="checkbox" checked={item.is_active} onChange={(e) => updateItem(item.id, { is_active: e.target.checked })} />
                 </td>
                 <td style={tdStyle}>
-                  <button onClick={() => deleteItem(item.id)} style={{ ...moveButtonStyle, color: "#b00020" }}>Delete</button>
+                  <button onClick={() => deleteItem(item.id)} style={{ ...moveButtonStyle, color: RED, borderColor: "#f0b8b8" }}>Delete</button>
                 </td>
               </tr>
             ))}
@@ -432,27 +697,116 @@ export default function AdminItemsPage() {
         </table>
         </div>
       )}
+
+      {pendingImport && (
+        <div style={modalOverlayStyle} onClick={cancelImport}>
+          <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontSize: 17, margin: "0 0 4px", color: NAVY }}>Confirm changes</h2>
+            <p style={{ fontSize: 13, color: "#666", margin: "0 0 14px" }}>
+              Review the affected items before overwriting.
+            </p>
+            <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 16 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "#f5f6f8", textAlign: "left" }}>
+                    <th style={{ padding: "6px 8px" }}>Item</th>
+                    <th style={{ padding: "6px 8px" }}>Changes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingImport.groups.map((g) => (
+                    <tr key={g.key} style={{ borderTop: "1px solid #eee" }}>
+                      <td style={{ padding: "6px 8px", fontWeight: 600, color: NAVY, whiteSpace: "nowrap" }}>
+                        {g.itemLabel}
+                        {g.isNew && (
+                          <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, color: "#1b8a3d", background: "#e6f4ea", borderRadius: 10, padding: "1px 8px" }}>
+                            New
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: "6px 8px", color: "#444" }}>
+                        {g.fields.length > 0 ? formatFields(g.fields) : g.isNew ? "New item" : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button type="button" onClick={cancelImport} style={secondaryButtonStyle}>Cancel</button>
+              <button type="button" onClick={confirmOverwrite} disabled={importing} style={buttonStyle}>
+                {importing ? "Overwriting..." : "Overwrite"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
 
+const inputStyle: React.CSSProperties = {
+  minWidth: 0,
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "8px 10px",
+  border: "1px solid #d9dde6",
+  borderRadius: 6,
+  fontSize: 13,
+};
+
 const buttonStyle: React.CSSProperties = {
   padding: "8px 16px",
-  background: "#111",
+  background: NAVY,
   color: "#fff",
   border: "none",
   borderRadius: 6,
   cursor: "pointer",
+  fontWeight: 600,
+  fontSize: 13,
+};
+
+const secondaryButtonStyle: React.CSSProperties = {
+  padding: "8px 16px",
+  background: "#fff",
+  color: NAVY,
+  border: `1px solid ${NAVY}`,
+  borderRadius: 6,
+  cursor: "pointer",
+  fontWeight: 600,
+  fontSize: 13,
 };
 
 const moveButtonStyle: React.CSSProperties = {
-  border: "1px solid #ccc",
+  border: `1px solid ${YELLOW}`,
   background: "#fff",
+  color: NAVY,
   borderRadius: 4,
   padding: "2px 8px",
   cursor: "pointer",
   marginRight: 4,
+  fontWeight: 600,
 };
 
-const thStyle: React.CSSProperties = { padding: "8px 6px", fontSize: 13 };
+const thStyle: React.CSSProperties = { padding: "9px 6px", fontSize: 13, color: "#fff", fontWeight: 700 };
 const tdStyle: React.CSSProperties = { padding: "6px 6px", fontSize: 13 };
+
+const modalOverlayStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.45)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 2000,
+  padding: 16,
+};
+
+const modalBoxStyle: React.CSSProperties = {
+  background: "#fff",
+  borderRadius: 12,
+  padding: 22,
+  width: "100%",
+  maxWidth: 560,
+  boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+};
