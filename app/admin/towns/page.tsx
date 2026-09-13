@@ -137,7 +137,7 @@ export default function AdminTownsPage() {
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: "array" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defaultValue: "" });
+      const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet);
 
       const byLowerName = new Map(towns.map((t) => [t.name.trim().toLowerCase(), t]));
 
