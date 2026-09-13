@@ -18,20 +18,34 @@ const emptyForm = { name: "", group_no: "", upc: "", discount: "" };
 
 // Excel column headers, in the exact order they're written and read back.
 // ID is included so renamed rows still match back to the right town —
-// matching by name text alone can't survive a rename.
+// matching by name text alone can't survive a rename. Rows with no ID and
+// no matching name are treated as brand-new towns to create.
 const EXCEL_HEADERS = ["ID", "Name", "Group No", "Code", "Discount", "Status"] as const;
 
-type PendingChange = {
-  townId: string;
+type FieldChange = { field: string; oldValue: string; newValue: string };
+
+// One entry per affected town (existing update OR brand-new creation) —
+// every changed field for that town lives together in one row, rather
+// than one row per field.
+type TownChangeGroup = {
+  key: string;
   townLabel: string;
-  field: "Name" | "Group No" | "Code";
-  oldValue: string;
-  newValue: string;
+  isNew: boolean;
+  fields: FieldChange[];
+};
+
+type NewTownPayload = {
+  name: string;
+  group_no: number | null;
+  upc: string | null;
+  discount: number | null;
+  is_active: boolean;
 };
 
 type PendingImport = {
   patches: { id: string; patch: Partial<TownWithDiscount> }[];
-  changes: PendingChange[];
+  creates: NewTownPayload[];
+  groups: TownChangeGroup[];
   skipped: number;
 };
 
@@ -117,7 +131,8 @@ export default function AdminTownsPage() {
 
   // Builds an .xlsx of the current towns list so the admin can edit values
   // in Excel and re-upload it. The ID column is included so a renamed row
-  // still matches back to the right town — don't delete/edit that column.
+  // still matches back to the right town. Leave ID blank on a new row to
+  // add a brand-new town.
   async function downloadTemplate() {
     const XLSX = await import("xlsx");
     const rows = towns.map((t) => ({
@@ -148,18 +163,30 @@ export default function AdminTownsPage() {
     }
   }
 
+  async function applyCreates(creates: NewTownPayload[]) {
+    for (const payload of creates) {
+      await fetch("/api/admin/towns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    }
+  }
+
   // Reads the uploaded workbook, matches each row to an existing town by
-  // ID (falling back to name, case-insensitive, if ID is missing), and
-  // compares Name / Group No / Code against the current values.
+  // ID (falling back to name, case-insensitive, if ID is missing).
   //
-  // - If none of those three changed anywhere in the file: Discount (and
-  //   Status) changes apply immediately — no confirmation needed.
-  // - If any of Name / Group No / Code changed for any row: nothing is
-  //   applied yet. A confirmation popup lists every affected Name/Group
-  //   No/Code change (Discount changes are never listed there, even
-  //   though they ride along in the same batch). Cancel applies nothing
-  //   at all — including any Discount-only changes in the same upload.
-  //   Overwrite applies everything at once.
+  // - Matched rows: compares Name / Group No / Code against current
+  //   values. Discount and Status changes are applied directly and never
+  //   shown in the confirmation popup.
+  // - Unmatched rows with a name: treated as a brand-new town to create.
+  // - Unmatched rows with no name at all: skipped.
+  //
+  // If any row needs a gated update OR any row is a new-town creation,
+  // nothing is applied yet — a popup lists every affected town (one row
+  // per town, all its changed fields together) with Cancel/Overwrite.
+  // Cancel applies nothing at all, including Discount-only changes riding
+  // along in the same upload.
   async function handleExcelFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ""; // allow re-selecting the same file later
@@ -180,63 +207,71 @@ export default function AdminTownsPage() {
       const byLowerName = new Map(towns.map((t) => [t.name.trim().toLowerCase(), t]));
 
       const patches: { id: string; patch: Partial<TownWithDiscount> }[] = [];
-      const changes: PendingChange[] = [];
+      const creates: NewTownPayload[] = [];
+      const groupsByKey = new Map<string, TownChangeGroup>();
       let skipped = 0;
 
-      for (const row of rows) {
+      rows.forEach((row, index) => {
         const rowId = String(row["ID"] ?? row["id"] ?? "").trim();
         const rawName = String(row["Name"] ?? row["name"] ?? "").trim();
 
-        let match = rowId ? byId.get(rowId) : undefined;
-        if (!match && rawName) match = byLowerName.get(rawName.toLowerCase());
+        const match = rowId ? byId.get(rowId) : rawName ? byLowerName.get(rawName.toLowerCase()) : undefined;
+
+        const groupNoRaw = row["Group No"] ?? row["group_no"];
+        const codeRaw = row["Code"] ?? row["code"] ?? row["upc"];
+        const discountRaw = row["Discount"] ?? row["discount"];
+        const statusRaw = String(row["Status"] ?? row["status"] ?? "").trim().toLowerCase();
+
         if (!match) {
-          skipped++;
-          continue;
+          // No existing town found — either a new town to create, or an
+          // empty/invalid row to skip.
+          if (!rawName) {
+            skipped++;
+            return;
+          }
+
+          const newGroupNo = groupNoRaw !== undefined && groupNoRaw !== "" ? parseInt(String(groupNoRaw), 10) : null;
+          const newCode = codeRaw !== undefined ? String(codeRaw).trim() || null : null;
+          const newDiscount = discountRaw !== undefined && discountRaw !== "" ? parseFloat(String(discountRaw)) : null;
+          const isActive = statusRaw !== "inactive"; // default active unless explicitly marked inactive
+
+          creates.push({ name: rawName, group_no: newGroupNo, upc: newCode, discount: newDiscount, is_active: isActive });
+
+          const fields: FieldChange[] = [];
+          if (newGroupNo !== null) fields.push({ field: "Group No", oldValue: "—", newValue: String(newGroupNo) });
+          if (newCode) fields.push({ field: "Code", oldValue: "—", newValue: newCode });
+          // Discount intentionally excluded from what's shown, per the same rule as updates.
+
+          groupsByKey.set(`new:${index}`, { key: `new:${index}`, townLabel: rawName, isNew: true, fields });
+          return;
         }
 
+        // Matched an existing town — diff the gated fields.
         const patch: Partial<TownWithDiscount> = {};
+        const fields: FieldChange[] = [];
 
-        // Name
         if (rawName && rawName !== match.name.trim()) {
           patch.name = rawName;
-          changes.push({ townId: match.id, townLabel: match.name, field: "Name", oldValue: match.name, newValue: rawName });
+          fields.push({ field: "Name", oldValue: match.name, newValue: rawName });
         }
 
-        // Group No
-        const groupNoRaw = row["Group No"] ?? row["group_no"];
         if (groupNoRaw !== undefined) {
           const newGroupNo = groupNoRaw === "" ? null : parseInt(String(groupNoRaw), 10);
           if (newGroupNo !== (match.group_no ?? null)) {
             patch.group_no = newGroupNo;
-            changes.push({
-              townId: match.id,
-              townLabel: match.name,
-              field: "Group No",
-              oldValue: String(match.group_no ?? ""),
-              newValue: String(newGroupNo ?? ""),
-            });
+            fields.push({ field: "Group No", oldValue: String(match.group_no ?? ""), newValue: String(newGroupNo ?? "") });
           }
         }
 
-        // Code
-        const codeRaw = row["Code"] ?? row["code"] ?? row["upc"];
         if (codeRaw !== undefined) {
           const newCode = String(codeRaw).trim() || null;
           if (newCode !== (match.upc ?? null)) {
             patch.upc = newCode;
-            changes.push({
-              townId: match.id,
-              townLabel: match.name,
-              field: "Code",
-              oldValue: match.upc ?? "",
-              newValue: newCode ?? "",
-            });
+            fields.push({ field: "Code", oldValue: match.upc ?? "", newValue: newCode ?? "" });
           }
         }
 
-        // Discount — excepted from the confirmation gate: always included
-        // in the patch when changed, but never added to `changes`.
-        const discountRaw = row["Discount"] ?? row["discount"];
+        // Discount — excepted from the confirmation gate.
         if (discountRaw !== undefined) {
           const newDiscount = discountRaw === "" ? null : parseFloat(String(discountRaw));
           if (newDiscount !== (match.discount ?? null)) {
@@ -245,28 +280,31 @@ export default function AdminTownsPage() {
         }
 
         // Status — also applied directly, not gated.
-        const statusRaw = String(row["Status"] ?? row["status"] ?? "").trim().toLowerCase();
         if (statusRaw === "active" && !match.is_active) patch.is_active = true;
         else if (statusRaw === "inactive" && match.is_active) patch.is_active = false;
 
         if (Object.keys(patch).length > 0) {
           patches.push({ id: match.id, patch });
         }
-      }
+        if (fields.length > 0) {
+          groupsByKey.set(match.id, { key: match.id, townLabel: match.name, isNew: false, fields });
+        }
+      });
 
-      if (changes.length > 0) {
-        // Name/Group No/Code changed somewhere — hold everything for
-        // confirmation instead of applying it.
-        setPendingImport({ patches, changes, skipped });
+      const groups = Array.from(groupsByKey.values());
+
+      if (groups.length > 0) {
+        // Gated updates and/or new towns found — hold everything for confirmation.
+        setPendingImport({ patches, creates, groups, skipped });
         setImporting(false);
         return;
       }
 
-      // Nothing gated changed — apply Discount/Status updates directly.
+      // Nothing gated changed and no new towns — apply Discount/Status updates directly.
       await applyPatches(patches);
       setExcelStatus(
         skipped > 0
-          ? `Updated ${patches.length} town${patches.length === 1 ? "" : "s"}, ${skipped} row${skipped === 1 ? "" : "s"} skipped (not found).`
+          ? `Updated ${patches.length} town${patches.length === 1 ? "" : "s"}, ${skipped} row${skipped === 1 ? "" : "s"} skipped.`
           : `Updated ${patches.length} town${patches.length === 1 ? "" : "s"}.`
       );
       loadTowns();
@@ -281,10 +319,12 @@ export default function AdminTownsPage() {
     if (!pendingImport) return;
     setImporting(true);
     await applyPatches(pendingImport.patches);
+    await applyCreates(pendingImport.creates);
+    const totalChanged = pendingImport.patches.length + pendingImport.creates.length;
     setExcelStatus(
       pendingImport.skipped > 0
-        ? `Updated ${pendingImport.patches.length} town${pendingImport.patches.length === 1 ? "" : "s"}, ${pendingImport.skipped} row${pendingImport.skipped === 1 ? "" : "s"} skipped (not found).`
-        : `Updated ${pendingImport.patches.length} town${pendingImport.patches.length === 1 ? "" : "s"}.`
+        ? `Updated ${totalChanged} town${totalChanged === 1 ? "" : "s"}, ${pendingImport.skipped} row${pendingImport.skipped === 1 ? "" : "s"} skipped.`
+        : `Updated ${totalChanged} town${totalChanged === 1 ? "" : "s"}.`
     );
     setPendingImport(null);
     setImporting(false);
@@ -293,9 +333,13 @@ export default function AdminTownsPage() {
 
   function cancelImport() {
     // Cancels everything in this batch, including any Discount-only
-    // changes that were riding along with the gated ones.
+    // changes that were riding along with the gated ones. No status
+    // banner is shown — closing the popup is feedback enough.
     setPendingImport(null);
-    setExcelStatus("Import cancelled — no changes were made.");
+  }
+
+  function formatFields(fields: FieldChange[]): string {
+    return fields.map((f) => `${f.field}: ${f.oldValue || "—"} → ${f.newValue || "—"}`).join(", ");
   }
 
   return (
@@ -322,10 +366,6 @@ export default function AdminTownsPage() {
           />
         </div>
       </div>
-
-      <p style={{ color: "#666", fontSize: 13, marginBottom: 8, marginLeft: 16 }}>
-        This list fills the Town dropdown on the public booking page. The Excel template's ID column is used to match rows back to towns — don't edit or remove it.
-      </p>
 
       {excelStatus && (
         <div style={{ color: NAVY, background: "#eef3fb", border: "1px solid #cddaf0", borderRadius: 6, padding: "6px 10px", marginBottom: 12, fontSize: 13 }}>
@@ -493,25 +533,30 @@ export default function AdminTownsPage() {
           <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
             <h2 style={{ fontSize: 17, margin: "0 0 4px", color: NAVY }}>Confirm changes</h2>
             <p style={{ fontSize: 13, color: "#666", margin: "0 0 14px" }}>
-              These Name / Group No / Code changes were found in the uploaded file. Review before overwriting.
+              Review the affected towns before overwriting.
             </p>
-            <div style={{ maxHeight: 280, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 16 }}>
+            <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 16 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "#f5f6f8", textAlign: "left" }}>
                     <th style={{ padding: "6px 8px" }}>Town</th>
-                    <th style={{ padding: "6px 8px" }}>Field</th>
-                    <th style={{ padding: "6px 8px" }}>Old</th>
-                    <th style={{ padding: "6px 8px" }}>New</th>
+                    <th style={{ padding: "6px 8px" }}>Changes</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {pendingImport.changes.map((c, i) => (
-                    <tr key={i} style={{ borderTop: "1px solid #eee" }}>
-                      <td style={{ padding: "6px 8px" }}>{c.townLabel}</td>
-                      <td style={{ padding: "6px 8px" }}>{c.field}</td>
-                      <td style={{ padding: "6px 8px", color: "#888" }}>{c.oldValue || "—"}</td>
-                      <td style={{ padding: "6px 8px", color: NAVY, fontWeight: 600 }}>{c.newValue || "—"}</td>
+                  {pendingImport.groups.map((g) => (
+                    <tr key={g.key} style={{ borderTop: "1px solid #eee" }}>
+                      <td style={{ padding: "6px 8px", fontWeight: 600, color: NAVY, whiteSpace: "nowrap" }}>
+                        {g.townLabel}
+                        {g.isNew && (
+                          <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, color: "#1b8a3d", background: "#e6f4ea", borderRadius: 10, padding: "1px 8px" }}>
+                            New
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: "6px 8px", color: "#444" }}>
+                        {g.fields.length > 0 ? formatFields(g.fields) : g.isNew ? "New town" : "—"}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
