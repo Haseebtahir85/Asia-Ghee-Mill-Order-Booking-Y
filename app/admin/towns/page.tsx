@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Town } from "@/lib/types";
 
 const NAVY = "#0b2b5b";
@@ -16,11 +16,17 @@ type TownWithDiscount = Town & { discount: number | null };
 
 const emptyForm = { name: "", group_no: "", upc: "", discount: "" };
 
+// Excel column headers, in the exact order they're written and read back.
+const EXCEL_HEADERS = ["Name", "Group No", "Code", "Discount", "Status"] as const;
+
 export default function AdminTownsPage() {
   const [towns, setTowns] = useState<TownWithDiscount[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
+  const [excelStatus, setExcelStatus] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function loadTowns() {
     setLoading(true);
@@ -92,15 +98,144 @@ export default function AdminTownsPage() {
     });
   }
 
+  // Builds an .xlsx of the current towns list so the admin can edit values
+  // in Excel and re-upload it. Loaded dynamically since it's client-only.
+  async function downloadTemplate() {
+    const XLSX = await import("xlsx");
+    const rows = towns.map((t) => ({
+      Name: t.name,
+      "Group No": t.group_no ?? "",
+      Code: t.upc ?? "",
+      Discount: t.discount ?? "",
+      Status: t.is_active ? "Active" : "Inactive",
+    }));
+    const sheet = XLSX.utils.json_to_sheet(rows, { header: [...EXCEL_HEADERS] });
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Towns");
+    XLSX.writeFile(workbook, "towns-template.xlsx");
+  }
+
+  function triggerExcelUpload() {
+    fileInputRef.current?.click();
+  }
+
+  // Reads the uploaded workbook, matches each row to an existing town by
+  // name (case-insensitive, whitespace-trimmed), and PATCHes every field
+  // present in that row. Rows whose name doesn't match any town are
+  // skipped and counted, not silently dropped.
+  async function handleExcelFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+
+    setImporting(true);
+    setExcelStatus(null);
+    setError(null);
+
+    try {
+      const XLSX = await import("xlsx");
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defaultValue: "" });
+
+      const byLowerName = new Map(towns.map((t) => [t.name.trim().toLowerCase(), t]));
+
+      let updated = 0;
+      let skipped = 0;
+
+      for (const row of rows) {
+        const rawName = String(row["Name"] ?? row["name"] ?? "").trim();
+        if (!rawName) {
+          skipped++;
+          continue;
+        }
+        const match = byLowerName.get(rawName.toLowerCase());
+        if (!match) {
+          skipped++;
+          continue;
+        }
+
+        const patch: Partial<TownWithDiscount> = {};
+
+        const groupNoRaw = row["Group No"] ?? row["group_no"];
+        if (groupNoRaw !== undefined && groupNoRaw !== "") {
+          patch.group_no = parseInt(String(groupNoRaw), 10);
+        } else if (groupNoRaw === "") {
+          patch.group_no = null;
+        }
+
+        const codeRaw = row["Code"] ?? row["code"] ?? row["upc"];
+        if (codeRaw !== undefined) {
+          patch.upc = String(codeRaw).trim() || null;
+        }
+
+        const discountRaw = row["Discount"] ?? row["discount"];
+        if (discountRaw !== undefined && discountRaw !== "") {
+          patch.discount = parseFloat(String(discountRaw));
+        } else if (discountRaw === "") {
+          patch.discount = null;
+        }
+
+        const statusRaw = String(row["Status"] ?? row["status"] ?? "").trim().toLowerCase();
+        if (statusRaw === "active") patch.is_active = true;
+        else if (statusRaw === "inactive") patch.is_active = false;
+
+        await fetch(`/api/admin/towns/${match.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        updated++;
+      }
+
+      setExcelStatus(
+        skipped > 0
+          ? `Updated ${updated} town${updated === 1 ? "" : "s"}, ${skipped} row${skipped === 1 ? "" : "s"} skipped (name not found).`
+          : `Updated ${updated} town${updated === 1 ? "" : "s"}.`
+      );
+      loadTowns();
+    } catch (err: any) {
+      setError(err.message || "Failed to read the Excel file.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return (
     <main style={{ maxWidth: 760, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif", background: "#fffdf5", minHeight: "100vh" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-        <div style={{ width: 6, height: 24, background: YELLOW, borderRadius: 3 }} />
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: NAVY, margin: 0 }}>Towns</h1>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 6, height: 24, background: YELLOW, borderRadius: 3 }} />
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: NAVY, margin: 0 }}>Towns</h1>
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" onClick={downloadTemplate} style={secondaryButtonStyle}>
+            Download Excel Template
+          </button>
+          <button type="button" onClick={triggerExcelUpload} disabled={importing} style={{ ...buttonStyle, opacity: importing ? 0.7 : 1 }}>
+            {importing ? "Updating..." : "Update Data via Excel"}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={handleExcelFile}
+            style={{ display: "none" }}
+          />
+        </div>
       </div>
-      <p style={{ color: "#666", fontSize: 13, marginBottom: 20, marginLeft: 16 }}>
+
+      <p style={{ color: "#666", fontSize: 13, marginBottom: 8, marginLeft: 16 }}>
         This list fills the Town dropdown on the public booking page.
       </p>
+
+      {excelStatus && (
+        <div style={{ color: NAVY, background: "#eef3fb", border: "1px solid #cddaf0", borderRadius: 6, padding: "6px 10px", marginBottom: 12, fontSize: 13 }}>
+          {excelStatus}
+        </div>
+      )}
 
       <form
         onSubmit={addTown}
@@ -278,6 +413,18 @@ const buttonStyle: React.CSSProperties = {
   borderRadius: 6,
   cursor: "pointer",
   fontWeight: 600,
+  fontSize: 13,
+};
+
+const secondaryButtonStyle: React.CSSProperties = {
+  padding: "8px 16px",
+  background: "#fff",
+  color: NAVY,
+  border: `1px solid ${NAVY}`,
+  borderRadius: 6,
+  cursor: "pointer",
+  fontWeight: 600,
+  fontSize: 13,
 };
 
 const moveButtonStyle: React.CSSProperties = {
