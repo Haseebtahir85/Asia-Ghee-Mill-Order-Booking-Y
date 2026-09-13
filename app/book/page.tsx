@@ -74,14 +74,19 @@ function getIconKind(item: Item): IconKind {
   return "bucket";
 }
 
-// Some items come in two rival pack sizes for the same base weight
-// (e.g. "1 Kg 12 Pack" vs "1 Kg 10 Pack") — only one of a pair should
-// ever be ordered at once. This pulls out a group key ("1", "1/2", "1/4")
-// from any item name that looks like "<weight> Kg ... Pack".
+// Some items come in two rival pack counts for the same base weight/volume
+// (e.g. "1 Kg 12 Pack" vs "1 Kg 10 Pack", or "1 Ltr. 10 Pack") — only one of
+// a pair should ever be ordered at once. This pulls out a group key made of
+// the number ("1", "1/2", "1/4") plus its unit (kg or ltr), so items are
+// only compared against same-weight, same-unit rivals — regardless of
+// exact spacing/punctuation in the name ("Ltr.", "Ltr", "L").
 function getPackGroupKey(item: Item): string | null {
-  if (!item.name.toLowerCase().includes("pack")) return null;
-  const match = item.name.match(/(\d+(?:\/\d+)?)\s*Kg/i);
-  return match ? match[1] : null;
+  const name = item.name.toLowerCase();
+  if (!name.includes("pack")) return null;
+  const match = name.match(/(\d+(?:\/\d+)?)\s*(kg|ltr\.?|l\b)/i);
+  if (!match) return null;
+  const unit = match[2].replace(/\./g, "").startsWith("l") ? "ltr" : "kg";
+  return `${match[1]}-${unit}`;
 }
 
 const QTY_OPTIONS = [1, 2, 3, 4];
@@ -437,42 +442,22 @@ export default function BookPage() {
                   );
                 })}
               </tbody>
-              <tfoot>
-                <tr className={styles.totalRow}>
-                  <td colSpan={2} style={{ textAlign: "left", padding: "6px 8px" }}>Total</td>
-                  <td className={styles.right} style={{ textAlign: "right", padding: "6px 8px" }}>{totals.weight.toFixed(2)} kg</td>
-                </tr>
-              </tfoot>
             </table>
           </div>
 
           <div style={summaryCardStyle}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 600, color: "#0b2b5b", marginBottom: 8 }}>
-              <span>Total Amount</span>
-              <span>{totals.amount.toLocaleString()}</span>
-            </div>
-
-            <div style={summaryRowStyle}>
-              <span>Weight (Ghee)</span>
-              <strong>{totals.gheeWeight.toFixed(2)} kg</strong>
-            </div>
-            <div style={summaryRowStyle}>
-              <span>Weight (Oil)</span>
-              <strong>{totals.oilWeight.toFixed(2)} kg</strong>
-            </div>
             <div style={summaryTotalBarStyle}>
               <span>Total Weight (Ton)</span>
               <strong>{totals.totalTon.toFixed(3)}</strong>
             </div>
 
-            <div style={summaryRowStyle}>
-              <span>Weight (RSO)</span>
-              <strong>{totals.rsoWeight.toFixed(2)} kg</strong>
+            <div style={summaryLineStyle}>
+              <span>Weight (Ghee) {totals.gheeWeight.toFixed(2)} kg</span>
+              <span>Weight (Oil) {totals.oilWeight.toFixed(2)} kg</span>
+              <span>Weight (RSO) {totals.rsoWeight.toFixed(2)} kg</span>
+              <span>Weight (SOAP) {totals.soapWeight.toFixed(2)} kg</span>
             </div>
-            <div style={summaryRowStyle}>
-              <span>Weight (SOAP)</span>
-              <strong>{totals.soapWeight.toFixed(2)} kg</strong>
-            </div>
+
             <div style={summaryGrandTotalBarStyle}>
               <span>G.Total Weight (Ton)</span>
               <strong>{totals.grandTotalTon.toFixed(3)}</strong>
@@ -496,7 +481,7 @@ export default function BookPage() {
           className={styles.submitBtn}
           style={{ width: "100%", display: "block", ...urduFont }}
         >
-          {submitting ? "بک ہو رہا ہے..." : " بک کریں"}
+          {submitting ? "بک ہو رہا ہے..." : "ابھی بک کریں"}
         </button>
       </form>
 
@@ -710,12 +695,14 @@ const summaryCardStyle: React.CSSProperties = {
   borderRadius: 10,
 };
 
-const summaryRowStyle: React.CSSProperties = {
+const summaryLineStyle: React.CSSProperties = {
   display: "flex",
+  flexWrap: "wrap",
   justifyContent: "space-between",
-  fontSize: 13,
+  gap: "4px 10px",
+  fontSize: 12.5,
   color: "#444",
-  padding: "2px 0",
+  padding: "8px 0",
 };
 
 const summaryTotalBarStyle: React.CSSProperties = {
@@ -727,7 +714,6 @@ const summaryTotalBarStyle: React.CSSProperties = {
   background: "#eef3fb",
   borderRadius: 6,
   padding: "6px 8px",
-  margin: "6px 0 10px",
 };
 
 const summaryGrandTotalBarStyle: React.CSSProperties = {
@@ -739,5 +725,4 @@ const summaryGrandTotalBarStyle: React.CSSProperties = {
   background: "#fff4e0",
   borderRadius: 6,
   padding: "7px 8px",
-  marginTop: 6,
 };
