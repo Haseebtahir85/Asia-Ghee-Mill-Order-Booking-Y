@@ -16,7 +16,11 @@ const urduFont: React.CSSProperties = {
 
 // Hard cap on the order's grand total weight (Ton). No order — regardless of
 // how many items or which pack family — may be booked past this limit.
+// The backend enforces 10.4 exactly; the user-facing message rounds down to
+// "10 Ton" and must always read this way, not "10.4".
 const MAX_GRAND_TOTAL_TON = 10.4;
+const WEIGHT_LIMIT_MESSAGE =
+  "کل وزن 10 ٹن سے زیادہ نہیں ہو سکتا۔ براہ کرم اپنے وزن کو کم کریں اور دوبارہ کوشش کریں۔";
 
 // True if the string contains Urdu/Arabic-script characters, so we only
 // apply the Urdu font to messages that are actually in Urdu.
@@ -130,6 +134,7 @@ export default function BookPage() {
   const [showQtyModal, setShowQtyModal] = useState(false);
   const [conflictModalNames, setConflictModalNames] = useState<string[] | null>(null);
   const conflictSignatureRef = useRef<string>("");
+  const [showWeightLimitModal, setShowWeightLimitModal] = useState(false);
 
   // Read-only Pakistan Standard Time clock (not derived from the device's local time zone)
   const [pkTime, setPkTime] = useState(getPakistanTimeString());
@@ -204,6 +209,12 @@ export default function BookPage() {
 
   const grandTotalExceedsLimit = totals.grandTotalTon > MAX_GRAND_TOTAL_TON;
 
+  // Live inline message: shows the moment typed quantities push the grand
+  // total past the cap, no submit click needed. Any other validation error
+  // (town not picked, pack conflict, etc.) only shows once the user tries
+  // to submit, so the weight message takes priority whenever it applies.
+  const displayedError = grandTotalExceedsLimit ? WEIGHT_LIMIT_MESSAGE : error;
+
   // Global rule: the "10 Pack" family and "12 Pack" family can never both
   // be active in the same order, regardless of weight — flag every active
   // item from both families the moment both are present at once.
@@ -266,9 +277,7 @@ export default function BookPage() {
     }
 
     if (grandTotalExceedsLimit) {
-      setError(
-        `کل وزن ${MAX_GRAND_TOTAL_TON} ٹن سے زیادہ نہیں ہو سکتا۔ آرڈر بک نہیں کیا جا سکتا۔ براہ کرم اپنے وزن کو کم کریں اور دوبارہ کوشش کریں۔۔`
-      );
+      setShowWeightLimitModal(true);
       return;
     }
 
@@ -286,9 +295,7 @@ export default function BookPage() {
     // in case totals changed between opening the modal and confirming it.
     if (grandTotalExceedsLimit) {
       setShowQtyModal(false);
-      setError(
-        `کل وزن ${MAX_GRAND_TOTAL_TON} ٹن سے زیادہ نہیں ہو سکتا۔ آرڈر بک نہیں کیا جا سکتا۔`
-      );
+      setShowWeightLimitModal(true);
       return;
     }
 
@@ -514,12 +521,12 @@ export default function BookPage() {
           </div>
         )}
 
-        {error && (
+        {displayedError && (
           <div
             className={styles.errorBanner}
-            style={isUrduText(error) ? { ...urduFont, textAlign: "right" } : undefined}
+            style={isUrduText(displayedError) ? { ...urduFont, textAlign: "right" } : undefined}
           >
-            {error}
+            {displayedError}
           </div>
         )}
 
@@ -576,6 +583,22 @@ export default function BookPage() {
             <button
               type="button"
               onClick={() => setConflictModalNames(null)}
+              style={qtyOptionButtonStyle}
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+      {showWeightLimitModal && (
+        <div style={modalOverlayStyle} onClick={() => setShowWeightLimitModal(false)}>
+          <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
+            <p style={{ ...urduFont, fontSize: 15, color: "#d62828", margin: "0 0 16px", textAlign: "right", lineHeight: 1.7 }}>
+              {WEIGHT_LIMIT_MESSAGE}
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowWeightLimitModal(false)}
               style={qtyOptionButtonStyle}
             >
               OK

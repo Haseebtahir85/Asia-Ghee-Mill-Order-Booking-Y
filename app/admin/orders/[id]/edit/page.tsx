@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Item, OrderStatus, OrderWithItems, Town } from "@/lib/types";
+import { Item, IconKind, OrderStatus, OrderWithItems, Town } from "@/lib/types";
 
 const NAVY = "#0b2b5b";
 const YELLOW = "#F6C90E";
@@ -15,6 +15,22 @@ const STATUS_OPTIONS: { value: OrderStatus; label: string }[] = [
   { value: "issue", label: "Issue" },
   { value: "done", label: "Done" },
 ];
+
+// Same fallback used on the public /book page — an explicit item.icon
+// wins, otherwise guessed from the name, so RSO/Soap totals line up with
+// what the customer actually saw when booking.
+function getIconKind(item: Item): IconKind {
+  if (item.icon) return item.icon;
+  const n = item.name.toLowerCase();
+  if (n.includes("rso")) return "bottle";
+  if (n.includes("soap")) return "soap";
+  if (n.includes("tin")) return "tin";
+  if (n.includes("pack")) return "pack";
+  if (n.includes("bucket") || n.includes("balti")) return "bucket";
+  if (item.type === "ghee") return "tin";
+  if (item.type === "oil") return "pack";
+  return "bucket";
+}
 
 export default function EditOrderPage({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -76,18 +92,26 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
   const rows = useMemo(() => {
     return items.map((item) => {
       const qty = parseFloat(qtys[item.id] || "0") || 0;
-      return { item, qty, amount: qty * item.rate, weight: qty * item.weight_kg };
+      return { item, qty, amount: qty * item.rate, weight: qty * item.weight_kg, kind: getIconKind(item) };
     });
   }, [items, qtys]);
 
   const totals = useMemo(() => {
     let amount = 0;
     let weight = 0;
+    let gheeWeight = 0;
+    let oilWeight = 0;
+    let rsoWeight = 0;
+    let soapWeight = 0;
     for (const r of rows) {
       amount += r.amount;
       weight += r.weight;
+      if (r.item.type === "ghee") gheeWeight += r.weight;
+      if (r.item.type === "oil") oilWeight += r.weight;
+      if (r.kind === "bottle") rsoWeight += r.weight;
+      if (r.kind === "soap") soapWeight += r.weight;
     }
-    return { amount, weight };
+    return { amount, weight, gheeWeight, oilWeight, rsoWeight, soapWeight, grandTotalTon: weight / 1000 };
   }, [rows]);
 
   async function save() {
@@ -163,8 +187,14 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
         </div>
       </div>
 
-      <div style={{ background: "#fff", border: `1px solid ${YELLOW}`, borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <div style={{ background: "#fff", border: `1px solid ${YELLOW}`, borderRadius: 10, overflow: "hidden", marginBottom: 12, maxWidth: 560 }}>
+        <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 13 }}>
+          <colgroup>
+            <col style={{ width: "48%" }} />
+            <col style={{ width: "18%" }} />
+            <col style={{ width: "17%" }} />
+            <col style={{ width: "17%" }} />
+          </colgroup>
           <thead>
             <tr style={{ background: NAVY, textAlign: "left" }}>
               <th style={thStyle}>Item</th>
@@ -176,7 +206,7 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
           <tbody>
             {rows.map(({ item, qty, amount, weight }) => (
               <tr key={item.id} style={{ borderBottom: "1px solid #f3e6b0" }}>
-                <td style={tdStyle}>{item.name}</td>
+                <td style={{ ...tdStyle, whiteSpace: "normal", wordBreak: "break-word" }}>{item.name}</td>
                 <td style={{ ...tdStyle, textAlign: "center" }}>
                   <input
                     type="number"
@@ -184,7 +214,7 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
                     step="1"
                     value={qtys[item.id] ?? ""}
                     onChange={(e) => updateQty(item.id, e.target.value)}
-                    style={{ width: 70, textAlign: "center", padding: 4, border: "1px solid #d9dde6", borderRadius: 4 }}
+                    style={{ width: "100%", maxWidth: 56, boxSizing: "border-box", textAlign: "center", padding: 4, border: "1px solid #d9dde6", borderRadius: 4 }}
                   />
                 </td>
                 <td style={{ ...tdStyle, textAlign: "right" }}>{amount ? amount.toLocaleString() : 0}</td>
@@ -200,6 +230,24 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
             </tr>
           </tfoot>
         </table>
+      </div>
+
+      <div style={statStripStyle}>
+        {[
+          { label: "Ghee", value: `${totals.gheeWeight.toFixed(2)} kg` },
+          { label: "Oil", value: `${totals.oilWeight.toFixed(2)} kg` },
+          { label: "RSO", value: `${totals.rsoWeight.toFixed(2)} kg` },
+          { label: "Soap", value: `${totals.soapWeight.toFixed(2)} kg` },
+        ].map((s) => (
+          <div key={s.label} style={statTileStyle}>
+            <div style={statLabelStyle}>{s.label}</div>
+            <div style={statValueStyle}>{s.value}</div>
+          </div>
+        ))}
+        <div style={{ ...statTileStyle, background: NAVY, borderColor: NAVY }}>
+          <div style={{ ...statLabelStyle, color: "#cfe0ff" }}>G.Total (Ton)</div>
+          <div style={{ ...statValueStyle, color: "#fff" }}>{totals.grandTotalTon.toFixed(3)}</div>
+        </div>
       </div>
 
       {error && (
@@ -237,5 +285,36 @@ const buttonStyle: React.CSSProperties = {
   fontSize: 14,
 };
 
-const thStyle: React.CSSProperties = { padding: "9px 8px", fontSize: 13, color: "#fff", fontWeight: 700 };
-const tdStyle: React.CSSProperties = { padding: "8px 8px" };
+const thStyle: React.CSSProperties = { padding: "8px 8px", fontSize: 13, color: "#fff", fontWeight: 700 };
+const tdStyle: React.CSSProperties = { padding: "6px 8px" };
+
+const statStripStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+  marginBottom: 16,
+};
+
+const statTileStyle: React.CSSProperties = {
+  flex: "1 1 100px",
+  background: "#fff",
+  border: "1px solid #e6e9ef",
+  borderRadius: 8,
+  padding: "8px 10px",
+  textAlign: "center",
+};
+
+const statLabelStyle: React.CSSProperties = {
+  fontSize: 10.5,
+  fontWeight: 700,
+  color: "#888",
+  textTransform: "uppercase",
+  letterSpacing: 0.3,
+};
+
+const statValueStyle: React.CSSProperties = {
+  fontSize: 14,
+  fontWeight: 700,
+  color: NAVY,
+  marginTop: 2,
+};
