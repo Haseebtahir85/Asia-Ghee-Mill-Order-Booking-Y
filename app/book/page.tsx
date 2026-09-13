@@ -196,7 +196,7 @@ export default function BookPage() {
     return (
       <div className={styles.page}>
       <main className={styles.wrapper}>
-        <Header pkTime={pkTime} />
+        <Header />
         <div className={styles.confirmCard}>
           <div className={styles.confirmIcon}>
             <CheckIcon />
@@ -225,13 +225,16 @@ export default function BookPage() {
   return (
     <div className={styles.page}>
     <main className={styles.wrapper}>
-      <Header pkTime={pkTime} />
+      <Header />
 
       <form onSubmit={submitOrder}>
-        <div className={styles.card}>
+        <div className={styles.card} style={{ overflow: "visible", position: "relative", zIndex: 10 }}>
           <div className={styles.fieldGrid}>
-            <div style={{ gridColumn: "1 / -1" }} ref={townBoxRef}>
-              <label className={styles.fieldLabel}>Town</label>
+            <div style={{ gridColumn: "1 / -1", position: "relative", zIndex: 50 }} ref={townBoxRef}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+                <label className={styles.fieldLabel}>Town</label>
+                <span style={{ fontSize: 12, color: "#666", fontVariantNumeric: "tabular-nums" }}>{pkTime}</span>
+              </div>
               <div style={{ position: "relative" }}>
                 <input
                   className={styles.select}
@@ -271,7 +274,7 @@ export default function BookPage() {
             No items found in the catalog. Add items in the admin panel before orders can be booked.
           </div>
         ) : (
-          <div className={styles.tableOuter}>
+          <div className={styles.tableOuter} style={{ position: "relative", zIndex: 1 }}>
           <div className={styles.tableWrap}>
             <table className={styles.table}>
               <colgroup>
@@ -358,24 +361,21 @@ export default function BookPage() {
   );
 }
 
-function Header({ pkTime }: { pkTime: string }) {
+function Header() {
   return (
     <div className={styles.hero}>
       <div className={styles.logoRow}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo.jpg" alt="Asia Ghee Mill" className={styles.logo} />
+        <img src="/logo.jpg" alt="ASIA GHEE MILLS (Pvt.) Ltd." className={styles.logo} />
         <div>
-          <h1 className={styles.brandTitle}>Asia Ghee Mill</h1>
+          <h1 className={styles.brandTitle}>ASIA GHEE MILLS (Pvt.) Ltd.</h1>
           <p className={styles.brandSub}>Order Booking</p>
         </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ fontSize: 12, color: "#666", fontVariantNumeric: "tabular-nums" }}>{pkTime}</span>
-        <Link href="/admin" title="Admin panel" aria-label="Open admin panel" className={styles.gearBtn}>
-          <SettingsIcon />
-        </Link>
-      </div>
+      <Link href="/admin" title="Admin panel" aria-label="Open admin panel" className={styles.gearBtn}>
+        <SettingsIcon />
+      </Link>
     </div>
   );
 }
@@ -466,7 +466,7 @@ const dropdownStyle: React.CSSProperties = {
   listStyle: "none",
   margin: 0,
   padding: 4,
-  zIndex: 20,
+  zIndex: 1000,
 };
 
 const dropdownItemStyle: React.CSSProperties = {
