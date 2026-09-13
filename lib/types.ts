@@ -1,5 +1,5 @@
 export type ItemType = "ghee" | "oil" | "other";
-export type OrderStatus = "pending" | "confirmed" | "dispatched" | "delivered" | "cancelled";
+export type OrderStatus = "pending" | "issue" | "done";
 export type IconKind = "tin" | "pack" | "bucket" | "bottle" | "soap";
 
 export interface Item {
