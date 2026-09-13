@@ -162,8 +162,12 @@ export async function POST(req: NextRequest) {
 
     // --- Item rows: one row per catalog item, filled in only where this
     // order actually has a line for it ---
-    const lineByItemId = new Map(order.order_items.map((l: any) => [l.item_id, l]));
-    const lineByName = new Map(order.order_items.map((l: any) => [l.item_name.trim().toLowerCase(), l]));
+    const lineByItemId = new Map<string, any>(
+      (order.order_items as any[]).map((l: any) => [l.item_id, l] as [string, any])
+    );
+    const lineByName = new Map<string, any>(
+      (order.order_items as any[]).map((l: any) => [l.item_name.trim().toLowerCase(), l] as [string, any])
+    );
 
     const firstRow = 6;
     (catalogItems ?? []).forEach((item, idx) => {
