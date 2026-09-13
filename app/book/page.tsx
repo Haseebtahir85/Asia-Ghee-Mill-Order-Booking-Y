@@ -416,7 +416,11 @@ export default function BookPage() {
                     <tr
                       key={item.id}
                       className={isGroupEnd ? styles.groupEnd : undefined}
-                      style={{ animation: "fadeUp 0.35s ease both", animationDelay: `${Math.min(i * 0.02, 0.4)}s` }}
+                      style={{
+                        animation: "fadeUp 0.35s ease both",
+                        animationDelay: `${Math.min(i * 0.02, 0.4)}s`,
+                        borderBottom: isGroupEnd ? "3px solid #FFD400" : undefined,
+                      }}
                     >
                       <td style={{ textAlign: "left", verticalAlign: "middle", padding: "6px 8px", whiteSpace: "normal", wordBreak: "break-word" }}>
                         <div className={styles.itemCell} style={{ whiteSpace: "normal", wordBreak: "break-word" }}>
