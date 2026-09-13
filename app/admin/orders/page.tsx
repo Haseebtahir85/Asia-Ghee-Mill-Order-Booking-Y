@@ -119,6 +119,8 @@ export default function AdminOrdersPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
+  const [exportingNew, setExportingNew] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Fetched once — every filter after that is instant, applied client-side
@@ -218,14 +220,50 @@ export default function AdminOrdersPage() {
   async function exportBulk() {
     setExporting(true);
     const ids = selected.size > 0 ? Array.from(selected) : filteredOrders.map((o) => o.id);
-    await exportOrders(ids, "orders-export.xlsx");
+    await exportOrders(ids, "orders-export.zip");
     setExporting(false);
   }
 
   async function exportOne(order: Order) {
     setExportingId(order.id);
-    await exportOrders([order.id], `order-${order.order_number}.xlsx`);
+    await exportOrders([order.id], `order-${order.order_number}.zip`);
     setExportingId(null);
+  }
+
+  async function exportNewOrders() {
+    setExportingNew(true);
+    setError(null);
+    setNotice(null);
+
+    const res = await fetch("/api/admin/orders/export-new", { method: "POST" });
+
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({ error: "Export failed" }));
+      if (res.status === 404) {
+        setNotice(json.error ?? "No new orders since the last export.");
+      } else {
+        setError(json.error ?? "Export failed");
+      }
+      setExportingNew(false);
+      return;
+    }
+
+    const warning = res.headers.get("X-Export-Marker-Warning");
+    if (warning) setError(warning);
+
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = disposition.match(/filename="(.+)"/);
+    a.href = url;
+    a.download = match ? match[1] : "new-orders.zip";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+    setExportingNew(false);
+    loadOrders();
   }
 
   return (
@@ -269,10 +307,21 @@ export default function AdminOrdersPage() {
           <DateRangePicker from={dateFrom} to={dateTo} onChange={(f, t) => { setDateFrom(f); setDateTo(t); }} />
         </div>
 
-        <button onClick={exportBulk} disabled={exporting || filteredOrders.length === 0} style={buttonStyle}>
-          {exporting ? "Exporting..." : selected.size > 0 ? `Export Selected (${selected.size})` : "Export All (filtered)"}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" onClick={exportNewOrders} disabled={exportingNew} style={secondaryButtonStyle}>
+            {exportingNew ? "Checking..." : "New Order"}
+          </button>
+          <button onClick={exportBulk} disabled={exporting || filteredOrders.length === 0} style={buttonStyle}>
+            {exporting ? "Exporting..." : selected.size > 0 ? `Export Selected (${selected.size})` : "Export All (filtered)"}
+          </button>
+        </div>
       </div>
+
+      {notice && (
+        <div style={{ color: NAVY, background: "#eef3fb", border: "1px solid #cddaf0", borderRadius: 6, padding: "6px 10px", marginBottom: 12, fontSize: 13 }}>
+          {notice}
+        </div>
+      )}
 
       {error && (
         <div style={{ color: RED, background: "#fdecec", border: "1px solid #f6c9c9", borderRadius: 6, padding: "6px 10px", marginBottom: 12, fontSize: 13 }}>
@@ -368,6 +417,17 @@ const buttonStyle: React.CSSProperties = {
   background: NAVY,
   color: "#fff",
   border: "none",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontWeight: 600,
+  fontSize: 13,
+};
+
+const secondaryButtonStyle: React.CSSProperties = {
+  padding: "8px 16px",
+  background: "#fff",
+  color: NAVY,
+  border: `1px solid ${NAVY}`,
   borderRadius: 6,
   cursor: "pointer",
   fontWeight: 600,
