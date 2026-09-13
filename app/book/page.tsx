@@ -250,7 +250,7 @@ export default function BookPage() {
     setError(null);
 
     if (!townId) {
-      setError("براہ کرم شہر منتخب کریں۔");
+      setError("براہ کرم ٹاؤن منتخب کریں۔");
       return;
     }
 
@@ -358,7 +358,7 @@ export default function BookPage() {
                 <input
                   className={styles.select}
                   style={{ width: "100%", ...urduFont }}
-                  placeholder="شہر تلاش کرنے کے لیے ٹائپ کریں..."
+                  placeholder="ٹاؤن تلاش کرنے کے لیے ٹائپ کریں..."
                   value={townQuery}
                   onChange={(e) => handleTownInputChange(e.target.value)}
                   onFocus={() => townSuggestions.length > 0 && setShowTownDropdown(true)}
