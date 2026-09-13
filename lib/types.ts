@@ -46,7 +46,7 @@ export interface OrderItem {
 export interface Order {
   id: string;
   order_number: string;
-  customer_name: string;
+  customer_name: string | null; // no longer collected by the /book page; may be null on new orders
   town_id: string | null;
   town: string | null; // snapshot of the town name at order time
   status: OrderStatus;
@@ -64,7 +64,6 @@ export interface OrderWithItems extends Order {
 
 // What the public /book page submits
 export interface NewOrderInput {
-  customer_name: string;
   town_id: string;
   notes?: string;
   lines: {

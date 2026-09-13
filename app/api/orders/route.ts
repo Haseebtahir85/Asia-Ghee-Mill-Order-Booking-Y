@@ -1,3 +1,4 @@
+// Destination: app/api/orders/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase";
 import { NewOrderInput } from "@/lib/types";
@@ -10,9 +11,9 @@ import { NewOrderInput } from "@/lib/types";
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as NewOrderInput;
 
-  if (!body.customer_name || !body.town_id || !Array.isArray(body.lines) || body.lines.length === 0) {
+  if (!body.town_id || !Array.isArray(body.lines) || body.lines.length === 0) {
     return NextResponse.json(
-      { error: "customer_name, town, and at least one order line are required" },
+      { error: "town and at least one order line are required" },
       { status: 400 }
     );
   }
@@ -75,7 +76,6 @@ export async function POST(req: NextRequest) {
   const { data: order, error: orderError } = await supabaseServer
     .from("orders")
     .insert({
-      customer_name: body.customer_name,
       town_id: town.id,
       town: town.name,
       notes: body.notes ?? null,
