@@ -267,7 +267,7 @@ export default function BookPage() {
 
     if (grandTotalExceedsLimit) {
       setError(
-        `کل وزن ${MAX_GRAND_TOTAL_TON} ٹن سے زیادہ نہیں ہو سکتا۔ آرڈر بک نہیں کیا جا سکتا۔`
+        `کل وزن ${MAX_GRAND_TOTAL_TON} ٹن سے زیادہ نہیں ہو سکتا۔ آرڈر بک نہیں کیا جا سکتا۔ براہ کرم اپنے وزن کو کم کریں اور دوبارہ کوشش کریں۔۔`
       );
       return;
     }
