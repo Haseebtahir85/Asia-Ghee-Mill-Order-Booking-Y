@@ -5,6 +5,13 @@ import Link from "next/link";
 import { Item, Town } from "@/lib/types";
 import styles from "./book.module.css";
 
+// Jameel Noori Nastaleeq must be registered elsewhere in the project
+// (e.g. via @font-face in globals.css) — this just references it by
+// name with sensible Urdu-capable fallbacks.
+const urduFont: React.CSSProperties = {
+  fontFamily: "'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', serif",
+};
+
 function townLabel(t: Town): string {
   return t.name;
 }
@@ -59,6 +66,8 @@ function getIconKind(item: Item): IconKind {
   return "bucket";
 }
 
+const QTY_OPTIONS = [1, 2, 3, 4];
+
 export default function BookPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [towns, setTowns] = useState<Town[]>([]);
@@ -72,7 +81,8 @@ export default function BookPage() {
   const townBoxRef = useRef<HTMLDivElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmedOrderNumber, setConfirmedOrderNumber] = useState<string | null>(null);
+  const [confirmedOrderNumbers, setConfirmedOrderNumbers] = useState<string[] | null>(null);
+  const [showQtyModal, setShowQtyModal] = useState(false);
 
   // Read-only Pakistan Standard Time clock (not derived from the device's local time zone)
   const [pkTime, setPkTime] = useState(getPakistanTimeString());
@@ -112,10 +122,10 @@ export default function BookPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Rate and per-unit weight are fetched but never rendered — they're
-  // only used here to compute each row's Amount/Weight live as the
-  // customer types a quantity. `kind` drives both the icon and the
-  // group-divider logic below.
+  // Rate and per-unit weight are fetched but never rendered per-row anymore —
+  // amount is still computed here (for the overall total) even though the
+  // Amount column itself is hidden from the table. `kind` drives the icon,
+  // the group-divider logic, and the RSO/Soap breakdown below.
   const rows = useMemo(() => {
     return items.map((item) => {
       const qty = parseFloat(qtys[item.id] || "0") || 0;
@@ -130,13 +140,17 @@ export default function BookPage() {
     let weight = 0;
     let gheeWeight = 0;
     let oilWeight = 0;
+    let rsoWeight = 0;
+    let soapWeight = 0;
     for (const r of rows) {
       amount += r.amount;
       weight += r.weight;
       if (r.item.type === "ghee") gheeWeight += r.weight;
       if (r.item.type === "oil") oilWeight += r.weight;
+      if (r.kind === "bottle") rsoWeight += r.weight;
+      if (r.kind === "soap") soapWeight += r.weight;
     }
-    return { amount, weight, gheeWeight, oilWeight };
+    return { amount, weight, gheeWeight, oilWeight, rsoWeight, soapWeight };
   }, [rows]);
 
   function updateQty(itemId: string, value: string) {
@@ -162,7 +176,7 @@ export default function BookPage() {
     setShowTownDropdown(false);
   }
 
-  async function submitOrder(e: React.FormEvent) {
+  function openQtyModal(e: React.FormEvent | React.MouseEvent) {
     e.preventDefault();
     setError(null);
 
@@ -177,28 +191,44 @@ export default function BookPage() {
       return;
     }
 
-    setSubmitting(true);
-    const res = await fetch("/api/orders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        town_id: townId,
-        lines,
-      }),
-    });
-    setSubmitting(false);
-
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({ error: "Failed to submit order" }));
-      setError(json.error ?? "Failed to submit order");
-      return;
-    }
-
-    const json = await res.json();
-    setConfirmedOrderNumber(json.order.order_number);
+    setShowQtyModal(true);
   }
 
-  if (confirmedOrderNumber) {
+  async function bookOrders(copies: number) {
+    setShowQtyModal(false);
+    setError(null);
+    setSubmitting(true);
+
+    const lines = rows.filter((r) => r.qty > 0).map((r) => ({ item_id: r.item.id, qty: r.qty }));
+    const orderNumbers: string[] = [];
+
+    try {
+      // Same town, same items — booked as `copies` separate bills, each
+      // getting its own order number from the backend.
+      for (let i = 0; i < copies; i++) {
+        const res = await fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ town_id: townId, lines }),
+        });
+
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({ error: "Failed to submit order" }));
+          throw new Error(json.error ?? "Failed to submit order");
+        }
+
+        const json = await res.json();
+        orderNumbers.push(json.order.order_number);
+      }
+      setConfirmedOrderNumbers(orderNumbers);
+    } catch (err: any) {
+      setError(err.message || "Failed to submit order");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (confirmedOrderNumbers) {
     return (
       <div className={styles.page}>
       <main className={styles.wrapper}>
@@ -209,12 +239,19 @@ export default function BookPage() {
           </div>
           <h1 style={{ fontSize: 21, margin: "0 0 8px", color: "#0b2b5b" }}>Order booked</h1>
           <p style={{ fontSize: 15, color: "#555", margin: 0 }}>
-            Your order number is <strong>{confirmedOrderNumber}</strong>.
+            {confirmedOrderNumbers.length === 1 ? (
+              <>Your order number is <strong>{confirmedOrderNumbers[0]}</strong>.</>
+            ) : (
+              <>
+                Your order numbers are:{" "}
+                <strong>{confirmedOrderNumbers.join(", ")}</strong>.
+              </>
+            )}
           </p>
           <button
             className={styles.secondaryBtn}
             onClick={() => {
-              setConfirmedOrderNumber(null);
+              setConfirmedOrderNumbers(null);
               setQtys({});
               setTownId("");
               setTownQuery("");
@@ -233,7 +270,7 @@ export default function BookPage() {
     <main className={styles.wrapper}>
       <Header />
 
-      <form onSubmit={submitOrder}>
+      <form onSubmit={openQtyModal}>
         <div className={styles.card} style={{ overflow: "visible", position: "relative", zIndex: 10 }}>
           <div className={styles.fieldGrid}>
             <div style={{ gridColumn: "1 / -1", position: "relative", zIndex: 50 }} ref={townBoxRef}>
@@ -246,8 +283,8 @@ export default function BookPage() {
               <div style={{ position: "relative" }}>
                 <input
                   className={styles.select}
-                  style={{ width: "100%" }}
-                  placeholder="Type to search towns..."
+                  style={{ width: "100%", ...urduFont }}
+                  placeholder="شہر تلاش کرنے کے لیے ٹائپ کریں..."
                   value={townQuery}
                   onChange={(e) => handleTownInputChange(e.target.value)}
                   onFocus={() => townSuggestions.length > 0 && setShowTownDropdown(true)}
@@ -286,21 +323,19 @@ export default function BookPage() {
           <div className={styles.tableWrap}>
             <table className={styles.table}>
               <colgroup>
-                <col style={{ width: "44%" }} />
-                <col style={{ width: "16%" }} />
+                <col style={{ width: "54%" }} />
                 <col style={{ width: "20%" }} />
-                <col style={{ width: "20%" }} />
+                <col style={{ width: "26%" }} />
               </colgroup>
               <thead>
                 <tr>
                   <th>Item</th>
                   <th className={styles.center}>Qty</th>
-                  <th className={styles.right}>Amount</th>
                   <th className={styles.right}>Weight</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map(({ item, amount, weight, kind }, i) => {
+                {rows.map(({ item, weight, kind }, i) => {
                   const isGroupEnd = i === rows.length - 1 || rows[i + 1].kind !== kind;
                   return (
                     <tr
@@ -326,7 +361,6 @@ export default function BookPage() {
                           className={styles.qtyInput}
                         />
                       </td>
-                      <td className={styles.right}>{amount ? amount.toLocaleString() : 0}</td>
                       <td className={styles.right}>{weight ? weight.toFixed(2) : 0}</td>
                     </tr>
                   );
@@ -334,22 +368,20 @@ export default function BookPage() {
               </tbody>
               <tfoot>
                 <tr className={styles.totalRow}>
-                  <td>Total</td>
-                  <td></td>
-                  <td className={styles.right}>{totals.amount.toLocaleString()}</td>
+                  <td colSpan={2}>Total</td>
                   <td className={styles.right}>{totals.weight.toFixed(2)} kg</td>
-                </tr>
-                <tr className={styles.breakdownRow}>
-                  <td colSpan={3} className={styles.breakdownLabel}>Weight breakdown</td>
-                  <td className={styles.right}>
-                    <div className={styles.weightBreakdown}>
-                      <span>Ghee: {totals.gheeWeight.toFixed(2)} kg</span>
-                      <span>Oil: {totals.oilWeight.toFixed(2)} kg</span>
-                    </div>
-                  </td>
                 </tr>
               </tfoot>
             </table>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, padding: "10px 4px 0" }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "#0b2b5b" }}>
+              Total Amount: {totals.amount.toLocaleString()}
+            </span>
+            <span style={{ fontSize: 13, color: "#444", ...urduFont }}>
+              وزن کی تفصیل: گھی {totals.gheeWeight.toFixed(2)} کلوگرام | تیل {totals.oilWeight.toFixed(2)} کلوگرام | آر ایس او {totals.rsoWeight.toFixed(2)} کلوگرام | صابن {totals.soapWeight.toFixed(2)} کلوگرام
+            </span>
           </div>
           </div>
         )}
@@ -360,11 +392,41 @@ export default function BookPage() {
           type="submit"
           disabled={submitting || loading || !!loadError || items.length === 0}
           className={styles.submitBtn}
-          style={{ width: "100%", display: "block" }}
+          style={{ width: "100%", display: "block", ...urduFont }}
         >
-          {submitting ? "Booking..." : "Book Order"}
+          {submitting ? "بک ہو رہا ہے..." : "ابھی بک کریں"}
         </button>
       </form>
+
+      {showQtyModal && (
+        <div style={modalOverlayStyle} onClick={() => setShowQtyModal(false)}>
+          <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontSize: 17, margin: "0 0 4px", color: "#0b2b5b" }}>Order Quantity</h2>
+            <p style={{ fontSize: 13, color: "#666", margin: "0 0 16px" }}>
+              How many bills should be booked for this same order? Each will get its own order number.
+            </p>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {QTY_OPTIONS.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => bookOrders(n)}
+                  style={qtyOptionButtonStyle}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowQtyModal(false)}
+              style={{ marginTop: 16, background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: 13 }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </main>
     </div>
   );
@@ -483,4 +545,36 @@ const dropdownItemStyle: React.CSSProperties = {
   fontSize: 14,
   cursor: "pointer",
   borderRadius: 6,
+};
+
+const modalOverlayStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.45)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 2000,
+  padding: 16,
+};
+
+const modalBoxStyle: React.CSSProperties = {
+  background: "#fff",
+  borderRadius: 12,
+  padding: 24,
+  width: "100%",
+  maxWidth: 360,
+  boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+};
+
+const qtyOptionButtonStyle: React.CSSProperties = {
+  flex: "1 1 60px",
+  padding: "10px 0",
+  fontSize: 16,
+  fontWeight: 600,
+  border: "1px solid #0b2b5b",
+  color: "#0b2b5b",
+  background: "#fff",
+  borderRadius: 8,
+  cursor: "pointer",
 };
