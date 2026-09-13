@@ -118,6 +118,7 @@ export default function AdminOrdersPage() {
   const [dateTo, setDateTo] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Fetched once — every filter after that is instant, applied client-side
@@ -185,10 +186,9 @@ export default function AdminOrdersPage() {
     });
   }
 
-  async function exportToExcel() {
-    setExporting(true);
+  async function exportOrders(ids: string[], fallbackFilename: string) {
+    if (ids.length === 0) return;
     setError(null);
-    const ids = selected.size > 0 ? Array.from(selected) : filteredOrders.map((o) => o.id);
 
     const res = await fetch("/api/admin/orders/export", {
       method: "POST",
@@ -199,7 +199,6 @@ export default function AdminOrdersPage() {
     if (!res.ok) {
       const json = await res.json().catch(() => ({ error: "Export failed" }));
       setError(json.error ?? "Export failed");
-      setExporting(false);
       return;
     }
 
@@ -209,12 +208,24 @@ export default function AdminOrdersPage() {
     const disposition = res.headers.get("Content-Disposition") ?? "";
     const match = disposition.match(/filename="(.+)"/);
     a.href = url;
-    a.download = match ? match[1] : "orders-export.xlsx";
+    a.download = match ? match[1] : fallbackFilename;
     document.body.appendChild(a);
     a.click();
     a.remove();
     window.URL.revokeObjectURL(url);
+  }
+
+  async function exportBulk() {
+    setExporting(true);
+    const ids = selected.size > 0 ? Array.from(selected) : filteredOrders.map((o) => o.id);
+    await exportOrders(ids, "orders-export.xlsx");
     setExporting(false);
+  }
+
+  async function exportOne(order: Order) {
+    setExportingId(order.id);
+    await exportOrders([order.id], `order-${order.order_number}.xlsx`);
+    setExportingId(null);
   }
 
   return (
@@ -258,7 +269,7 @@ export default function AdminOrdersPage() {
           <DateRangePicker from={dateFrom} to={dateTo} onChange={(f, t) => { setDateFrom(f); setDateTo(t); }} />
         </div>
 
-        <button onClick={exportToExcel} disabled={exporting || filteredOrders.length === 0} style={buttonStyle}>
+        <button onClick={exportBulk} disabled={exporting || filteredOrders.length === 0} style={buttonStyle}>
           {exporting ? "Exporting..." : selected.size > 0 ? `Export Selected (${selected.size})` : "Export All (filtered)"}
         </button>
       </div>
@@ -320,7 +331,16 @@ export default function AdminOrdersPage() {
                     </select>
                   </td>
                   <td style={tdStyle}>
-                    <Link href={`/admin/orders/${o.id}/edit`} style={editButtonStyle}>Edit</Link>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Link href={`/admin/orders/${o.id}/edit`} style={editButtonStyle}>Edit</Link>
+                      <button
+                        onClick={() => exportOne(o)}
+                        disabled={exportingId === o.id}
+                        style={{ ...editButtonStyle, background: "none", cursor: "pointer" }}
+                      >
+                        {exportingId === o.id ? "..." : "Export"}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
