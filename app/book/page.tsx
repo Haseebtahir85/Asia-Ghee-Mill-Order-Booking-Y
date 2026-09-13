@@ -14,6 +14,10 @@ const urduFont: React.CSSProperties = {
   fontFamily: "var(--font-jameel-noori), var(--font-noto-nastaliq), 'Noto Nastaliq Urdu', serif",
 };
 
+// Hard cap on the order's grand total weight (Ton). No order — regardless of
+// how many items or which pack family — may be booked past this limit.
+const MAX_GRAND_TOTAL_TON = 10.4;
+
 // True if the string contains Urdu/Arabic-script characters, so we only
 // apply the Urdu font to messages that are actually in Urdu.
 function isUrduText(text: string): boolean {
@@ -198,6 +202,8 @@ export default function BookPage() {
     return { amount, weight, gheeWeight, oilWeight, rsoWeight, soapWeight, totalTon, grandTotalTon };
   }, [rows]);
 
+  const grandTotalExceedsLimit = totals.grandTotalTon > MAX_GRAND_TOTAL_TON;
+
   // Global rule: the "10 Pack" family and "12 Pack" family can never both
   // be active in the same order, regardless of weight — flag every active
   // item from both families the moment both are present at once.
@@ -259,6 +265,13 @@ export default function BookPage() {
       return;
     }
 
+    if (grandTotalExceedsLimit) {
+      setError(
+        `کل وزن ${MAX_GRAND_TOTAL_TON} ٹن سے زیادہ نہیں ہو سکتا۔ آرڈر بک نہیں کیا جا سکتا۔`
+      );
+      return;
+    }
+
     const lines = rows.filter((r) => r.qty > 0).map((r) => ({ item_id: r.item.id, qty: r.qty }));
     if (lines.length === 0) {
       setError("Enter a quantity for at least one item.");
@@ -269,6 +282,16 @@ export default function BookPage() {
   }
 
   async function bookOrders(copies: number) {
+    // Belt-and-braces: re-check the cap right before hitting the API too,
+    // in case totals changed between opening the modal and confirming it.
+    if (grandTotalExceedsLimit) {
+      setShowQtyModal(false);
+      setError(
+        `کل وزن ${MAX_GRAND_TOTAL_TON} ٹن سے زیادہ نہیں ہو سکتا۔ آرڈر بک نہیں کیا جا سکتا۔`
+      );
+      return;
+    }
+
     setShowQtyModal(false);
     setError(null);
     setSubmitting(true);
@@ -476,7 +499,14 @@ export default function BookPage() {
               ))}
             </div>
 
-            <div style={summaryGrandTotalBarStyle}>
+            <div
+              style={{
+                ...summaryGrandTotalBarStyle,
+                ...(grandTotalExceedsLimit
+                  ? { background: "#fdeaea", color: "#d62828" }
+                  : null),
+              }}
+            >
               <span>G.Total Weight (Ton)</span>
               <strong>{totals.grandTotalTon.toFixed(3)}</strong>
             </div>

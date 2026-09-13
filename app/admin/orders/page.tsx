@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Order, OrderStatus, Town } from "@/lib/types";
+import { Order, OrderStatus } from "@/lib/types";
 
 const NAVY = "#0b2b5b";
 const YELLOW = "#F6C90E";
@@ -20,9 +20,97 @@ const STATUS_STYLES: Record<OrderStatus, { color: string; background: string }> 
   done: { color: "#1b8a3d", background: "#e6f4ea" },
 };
 
+function formatDateLabel(iso: string): string {
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+// A single control that opens a small popover with two native date inputs
+// (Start/End) instead of two separate fields sitting in the filter bar —
+// picking both, then closing, is "one date picker" for the whole range.
+function DateRangePicker({
+  from,
+  to,
+  onChange,
+}: {
+  from: string;
+  to: string;
+  onChange: (from: string, to: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const label = from && to ? `${formatDateLabel(from)} – ${formatDateLabel(to)}` : from ? `From ${formatDateLabel(from)}` : to ? `Until ${formatDateLabel(to)}` : "All dates";
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <label style={labelStyle}>Date range</label>
+      <button type="button" onClick={() => setOpen((o) => !o)} style={{ ...filterInputStyle, textAlign: "left", cursor: "pointer", minWidth: 170 }}>
+        {label}
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            zIndex: 30,
+            background: "#fff",
+            border: `1px solid ${YELLOW}`,
+            borderRadius: 8,
+            boxShadow: "0 6px 16px rgba(0,0,0,0.12)",
+            padding: 12,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div style={{ display: "flex", gap: 8 }}>
+            <div>
+              <label style={labelStyle}>Start</label>
+              <input type="date" value={from} max={to || undefined} onChange={(e) => onChange(e.target.value, to)} style={filterInputStyle} />
+            </div>
+            <div>
+              <label style={labelStyle}>End</label>
+              <input type="date" value={to} min={from || undefined} onChange={(e) => onChange(from, e.target.value)} style={filterInputStyle} />
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => {
+                onChange("", "");
+              }}
+              style={{ background: "none", border: "none", color: "#888", fontSize: 12, cursor: "pointer", padding: 0 }}
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              style={{ background: NAVY, color: "#fff", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdminOrdersPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [towns, setTowns] = useState<Town[]>([]);
+  const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "">("");
   const [townFilter, setTownFilter] = useState("");
@@ -32,30 +120,45 @@ export default function AdminOrdersPage() {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/admin/towns")
-      .then((res) => res.json())
-      .then((json) => setTowns(json.towns ?? []))
-      .catch(() => {});
-  }, []);
-
+  // Fetched once — every filter after that is instant, applied client-side
+  // against this same list, with no network round-trip per change.
   async function loadOrders() {
     setLoading(true);
-    const params = new URLSearchParams();
-    if (statusFilter) params.set("status", statusFilter);
-    if (townFilter) params.set("town_id", townFilter);
-    if (dateFrom) params.set("from", dateFrom);
-    if (dateTo) params.set("to", dateTo);
-    const res = await fetch(`/api/admin/orders?${params.toString()}`);
+    const res = await fetch("/api/admin/orders");
     const json = await res.json();
-    setOrders(json.orders ?? []);
+    setAllOrders(json.orders ?? []);
     setLoading(false);
   }
 
   useEffect(() => {
     loadOrders();
+  }, []);
+
+  // Town filter options come straight from the orders actually loaded —
+  // never the full towns catalog, so it only ever lists towns that appear
+  // in the order list, and never depends on a second network call.
+  const townOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const o of allOrders) {
+      if (o.town_id && o.town && !seen.has(o.town_id)) seen.set(o.town_id, o.town);
+    }
+    return Array.from(seen.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [allOrders]);
+
+  const filteredOrders = useMemo(() => {
+    return allOrders.filter((o) => {
+      if (statusFilter && o.status !== statusFilter) return false;
+      if (townFilter && o.town_id !== townFilter) return false;
+      if (dateFrom && o.order_date < dateFrom) return false;
+      if (dateTo && o.order_date > dateTo) return false;
+      return true;
+    });
+  }, [allOrders, statusFilter, townFilter, dateFrom, dateTo]);
+
+  useEffect(() => {
     setSelected(new Set());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, townFilter, dateFrom, dateTo]);
 
   function toggleSelect(id: string) {
@@ -68,35 +171,29 @@ export default function AdminOrdersPage() {
   }
 
   function toggleSelectAll() {
-    setSelected(selected.size === orders.length ? new Set() : new Set(orders.map((o) => o.id)));
+    setSelected(selected.size === filteredOrders.length ? new Set() : new Set(filteredOrders.map((o) => o.id)));
   }
 
   async function updateStatus(id: string, status: OrderStatus) {
+    // Optimistic update — the row reflects the new status immediately,
+    // no waiting on a refetch to feel responsive.
+    setAllOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status } : o)));
     await fetch(`/api/admin/orders/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     });
-    loadOrders();
   }
 
   async function exportToExcel() {
     setExporting(true);
     setError(null);
-    const body =
-      selected.size > 0
-        ? { ids: Array.from(selected) }
-        : {
-            status: statusFilter || undefined,
-            town_id: townFilter || undefined,
-            from: dateFrom || undefined,
-            to: dateTo || undefined,
-          };
+    const ids = selected.size > 0 ? Array.from(selected) : filteredOrders.map((o) => o.id);
 
     const res = await fetch("/api/admin/orders/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ids }),
     });
 
     if (!res.ok) {
@@ -154,22 +251,14 @@ export default function AdminOrdersPage() {
             <label style={labelStyle}>Town</label>
             <select value={townFilter} onChange={(e) => setTownFilter(e.target.value)} style={filterInputStyle}>
               <option value="">All towns</option>
-              {towns.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {townOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </div>
 
-          <div>
-            <label style={labelStyle}>From</label>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={filterInputStyle} />
-          </div>
-
-          <div>
-            <label style={labelStyle}>To</label>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={filterInputStyle} />
-          </div>
+          <DateRangePicker from={dateFrom} to={dateTo} onChange={(f, t) => { setDateFrom(f); setDateTo(t); }} />
         </div>
 
-        <button onClick={exportToExcel} disabled={exporting || orders.length === 0} style={buttonStyle}>
+        <button onClick={exportToExcel} disabled={exporting || filteredOrders.length === 0} style={buttonStyle}>
           {exporting ? "Exporting..." : selected.size > 0 ? `Export Selected (${selected.size})` : "Export All (filtered)"}
         </button>
       </div>
@@ -182,7 +271,7 @@ export default function AdminOrdersPage() {
 
       {loading ? (
         <p>Loading...</p>
-      ) : orders.length === 0 ? (
+      ) : filteredOrders.length === 0 ? (
         <div style={{ padding: 32, textAlign: "center", color: "#888", background: "#fff", border: `1px solid ${YELLOW}`, borderRadius: 10 }}>
           No orders match these filters.
         </div>
@@ -191,7 +280,7 @@ export default function AdminOrdersPage() {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ textAlign: "left", background: NAVY }}>
-              <th style={thStyle}><input type="checkbox" checked={selected.size === orders.length && orders.length > 0} onChange={toggleSelectAll} /></th>
+              <th style={thStyle}><input type="checkbox" checked={selected.size === filteredOrders.length && filteredOrders.length > 0} onChange={toggleSelectAll} /></th>
               <th style={thStyle}>Order #</th>
               <th style={thStyle}>Date</th>
               <th style={thStyle}>Town</th>
@@ -202,7 +291,7 @@ export default function AdminOrdersPage() {
             </tr>
           </thead>
           <tbody>
-            {orders.map((o) => {
+            {filteredOrders.map((o) => {
               const statusStyle = STATUS_STYLES[o.status];
               return (
                 <tr key={o.id} style={{ borderBottom: "1px solid #f3e6b0" }}>
@@ -251,6 +340,7 @@ const filterInputStyle: React.CSSProperties = {
   border: "1px solid #d9dde6",
   borderRadius: 6,
   fontSize: 13,
+  background: "#fff",
 };
 
 const buttonStyle: React.CSSProperties = {
