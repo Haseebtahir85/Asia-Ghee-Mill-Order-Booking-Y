@@ -1,3 +1,4 @@
+// Destination: app/api/admin/towns/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase";
 
@@ -40,6 +41,7 @@ export async function POST(req: NextRequest) {
       name: body.name.trim(),
       group_no: body.group_no ?? null,
       upc: body.upc ?? null,
+      discount: body.discount ?? null,
       sort_order: sortOrder,
       is_active: body.is_active ?? true,
     })

@@ -22,6 +22,7 @@ export interface Town {
   name: string;
   group_no: number | null;
   upc: string | null;
+  discount: number | null;
   sort_order: number;
   is_active: boolean;
   created_at: string;

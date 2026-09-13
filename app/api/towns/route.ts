@@ -1,3 +1,4 @@
+// Destination: app/api/towns/route.ts
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase";
 
