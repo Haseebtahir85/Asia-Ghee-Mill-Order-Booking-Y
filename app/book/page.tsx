@@ -234,7 +234,7 @@ export default function BookPage() {
     setError(null);
 
     if (!townId) {
-      setError("Please select a town.");
+      setError("براہ کرم شہر منتخب کریں۔");
       return;
     }
 
@@ -288,7 +288,7 @@ export default function BookPage() {
 
   if (confirmedOrderNumbers) {
     return (
-      <div className={styles.page}>
+      <div className={styles.page} style={{ overflowX: "hidden" }}>
       <main className={styles.wrapper}>
         <Header />
         <div className={styles.confirmCard}>
@@ -324,7 +324,7 @@ export default function BookPage() {
   }
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} style={{ overflowX: "hidden" }}>
     <main className={styles.wrapper}>
       <Header />
 
@@ -377,9 +377,9 @@ export default function BookPage() {
             No items found in the catalog. Add items in the admin panel before orders can be booked.
           </div>
         ) : (
-          <div className={styles.tableOuter} style={{ position: "relative", zIndex: 1, maxWidth: 480, margin: "0 auto" }}>
-          <div className={styles.tableWrap}>
-            <table className={styles.table} style={{ tableLayout: "fixed", width: "100%", borderCollapse: "collapse" }}>
+          <div className={styles.tableOuter} style={{ position: "relative", zIndex: 1, width: "100%", maxWidth: 480, margin: "0 auto" }}>
+          <div className={styles.tableWrap} style={{ overflowX: "hidden", width: "100%" }}>
+            <table className={styles.table} style={{ tableLayout: "fixed", width: "100%", maxWidth: "100%", minWidth: 0, borderCollapse: "collapse" }}>
               <colgroup>
                 <col style={{ width: "54%" }} />
                 <col style={{ width: "20%" }} />
@@ -402,8 +402,8 @@ export default function BookPage() {
                       className={isGroupEnd ? styles.groupEnd : undefined}
                       style={{ animation: "fadeUp 0.35s ease both", animationDelay: `${Math.min(i * 0.02, 0.4)}s` }}
                     >
-                      <td style={{ textAlign: "left", verticalAlign: "middle", padding: "6px 8px" }}>
-                        <div className={styles.itemCell}>
+                      <td style={{ textAlign: "left", verticalAlign: "middle", padding: "6px 8px", whiteSpace: "normal", wordBreak: "break-word" }}>
+                        <div className={styles.itemCell} style={{ whiteSpace: "normal", wordBreak: "break-word" }}>
                           <span className={styles.itemIcon}>
                             <ProductIcon kind={kind} />
                           </span>
@@ -421,7 +421,8 @@ export default function BookPage() {
                           style={{
                             boxSizing: "border-box",
                             width: "100%",
-                            maxWidth: 70,
+                            maxWidth: 60,
+                            minWidth: 0,
                             display: "block",
                             margin: "0 auto",
                             textAlign: "center",
