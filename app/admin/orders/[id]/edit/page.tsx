@@ -158,7 +158,7 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
   }
 
   return (
-    <main style={{ maxWidth: 800, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif", background: "#fffdf5", minHeight: "100vh" }}>
+    <main style={{ maxWidth: 560, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif", background: "#fffdf5", minHeight: "100vh" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 6, height: 24, background: YELLOW, borderRadius: 3 }} />
@@ -187,7 +187,7 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
         </div>
       </div>
 
-      <div style={{ background: "#fff", border: `1px solid ${YELLOW}`, borderRadius: 10, overflow: "hidden", marginBottom: 12, maxWidth: 560 }}>
+      <div style={{ background: "#fff", border: `1px solid ${YELLOW}`, borderRadius: 10, overflow: "hidden", marginBottom: 12, width: "100%" }}>
         <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 13 }}>
           <colgroup>
             <col style={{ width: "48%" }} />

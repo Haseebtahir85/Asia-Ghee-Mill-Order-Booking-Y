@@ -285,7 +285,7 @@ export default function AdminOrdersPage() {
               <th style={thStyle}>Date</th>
               <th style={thStyle}>Town</th>
               <th style={thStyle}>Amount</th>
-              <th style={thStyle}>Weight (kg)</th>
+              <th style={thStyle}>Weight (Ton)</th>
               <th style={thStyle}>Status</th>
               <th style={thStyle}></th>
             </tr>
@@ -300,7 +300,7 @@ export default function AdminOrdersPage() {
                   <td style={tdStyle}>{o.order_date}</td>
                   <td style={tdStyle}>{o.town ?? ""}</td>
                   <td style={tdStyle}>{o.total_amount.toLocaleString()}</td>
-                  <td style={tdStyle}>{o.total_weight_kg.toFixed(2)}</td>
+                  <td style={tdStyle}>{(o.total_weight_kg / 1000).toFixed(3)}</td>
                   <td style={tdStyle}>
                     <select
                       value={o.status}
