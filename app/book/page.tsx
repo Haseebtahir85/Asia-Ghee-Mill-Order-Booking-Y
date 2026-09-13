@@ -68,6 +68,16 @@ function getIconKind(item: Item): IconKind {
   return "bucket";
 }
 
+// Some items come in two rival pack sizes for the same base weight
+// (e.g. "1 Kg 12 Pack" vs "1 Kg 10 Pack") — only one of a pair should
+// ever be ordered at once. This pulls out a group key ("1", "1/2", "1/4")
+// from any item name that looks like "<weight> Kg ... Pack".
+function getPackGroupKey(item: Item): string | null {
+  if (!item.name.toLowerCase().includes("pack")) return null;
+  const match = item.name.match(/(\d+(?:\/\d+)?)\s*Kg/i);
+  return match ? match[1] : null;
+}
+
 const QTY_OPTIONS = [1, 2, 3, 4];
 
 export default function BookPage() {
@@ -152,7 +162,28 @@ export default function BookPage() {
       if (r.kind === "bottle") rsoWeight += r.weight;
       if (r.kind === "soap") soapWeight += r.weight;
     }
-    return { amount, weight, gheeWeight, oilWeight, rsoWeight, soapWeight };
+    const totalTon = (gheeWeight + oilWeight) / 1000;
+    const grandTotalTon = weight / 1000;
+    return { amount, weight, gheeWeight, oilWeight, rsoWeight, soapWeight, totalTon, grandTotalTon };
+  }, [rows]);
+
+  // Rival pack-size items (same weight, different pack count) — flag any
+  // item whose group has more than one entry with a qty entered.
+  const conflictItemIds = useMemo(() => {
+    const groups: Record<string, typeof rows> = {};
+    for (const r of rows) {
+      const key = getPackGroupKey(r.item);
+      if (!key) continue;
+      (groups[key] ||= []).push(r);
+    }
+    const conflicts = new Set<string>();
+    for (const key in groups) {
+      const active = groups[key].filter((r) => r.qty > 0);
+      if (active.length > 1) {
+        active.forEach((r) => conflicts.add(r.item.id));
+      }
+    }
+    return conflicts;
   }, [rows]);
 
   function updateQty(itemId: string, value: string) {
@@ -184,6 +215,11 @@ export default function BookPage() {
 
     if (!townId) {
       setError("Please select a town.");
+      return;
+    }
+
+    if (conflictItemIds.size > 0) {
+      setError("صرف ایک پیک سائز منتخب کریں — ایک ہی وزن کے دو مختلف پیک ایک ساتھ نہیں لیے جا سکتے۔");
       return;
     }
 
@@ -323,7 +359,7 @@ export default function BookPage() {
         ) : (
           <div className={styles.tableOuter} style={{ position: "relative", zIndex: 1 }}>
           <div className={styles.tableWrap}>
-            <table className={styles.table}>
+            <table className={styles.table} style={{ tableLayout: "fixed", width: "100%", borderCollapse: "collapse" }}>
               <colgroup>
                 <col style={{ width: "54%" }} />
                 <col style={{ width: "20%" }} />
@@ -331,21 +367,22 @@ export default function BookPage() {
               </colgroup>
               <thead>
                 <tr>
-                  <th>Item</th>
-                  <th className={styles.center}>Qty</th>
-                  <th className={styles.right}>Weight</th>
+                  <th style={{ textAlign: "left" }}>Item</th>
+                  <th className={styles.center} style={{ textAlign: "center" }}>Qty</th>
+                  <th className={styles.right} style={{ textAlign: "right" }}>Weight</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map(({ item, weight, kind }, i) => {
                   const isGroupEnd = i === rows.length - 1 || rows[i + 1].kind !== kind;
+                  const hasConflict = conflictItemIds.has(item.id);
                   return (
                     <tr
                       key={item.id}
                       className={isGroupEnd ? styles.groupEnd : undefined}
                       style={{ animation: "fadeUp 0.35s ease both", animationDelay: `${Math.min(i * 0.02, 0.4)}s` }}
                     >
-                      <td>
+                      <td style={{ textAlign: "left", verticalAlign: "middle" }}>
                         <div className={styles.itemCell}>
                           <span className={styles.itemIcon}>
                             <ProductIcon kind={kind} />
@@ -353,7 +390,7 @@ export default function BookPage() {
                           {item.name}
                         </div>
                       </td>
-                      <td className={styles.center}>
+                      <td className={styles.center} style={{ textAlign: "center", verticalAlign: "middle" }}>
                         <input
                           type="number"
                           min={0}
@@ -361,32 +398,68 @@ export default function BookPage() {
                           value={qtys[item.id] ?? ""}
                           onChange={(e) => updateQty(item.id, e.target.value)}
                           className={styles.qtyInput}
+                          style={{
+                            boxSizing: "border-box",
+                            width: "100%",
+                            maxWidth: 80,
+                            display: "block",
+                            margin: "0 auto",
+                            textAlign: "center",
+                            borderColor: hasConflict ? "#d62828" : undefined,
+                          }}
                         />
+                        {hasConflict && (
+                          <div style={{ ...urduFont, fontSize: 11, color: "#d62828", marginTop: 4, textAlign: "center" }}>
+                            صرف ایک پیک سائز منتخب کریں
+                          </div>
+                        )}
                       </td>
-                      <td className={styles.right}>{weight ? weight.toFixed(2) : 0}</td>
+                      <td className={styles.right} style={{ textAlign: "right", verticalAlign: "middle" }}>
+                        {weight ? weight.toFixed(2) : 0}
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
               <tfoot>
                 <tr className={styles.totalRow}>
-                  <td colSpan={2}>Total</td>
-                  <td className={styles.right}>{totals.weight.toFixed(2)} kg</td>
+                  <td colSpan={2} style={{ textAlign: "left" }}>Total</td>
+                  <td className={styles.right} style={{ textAlign: "right" }}>{totals.weight.toFixed(2)} kg</td>
                 </tr>
               </tfoot>
             </table>
           </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, padding: "10px 4px 0" }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: "#0b2b5b" }}>
-              Total Amount: {totals.amount.toLocaleString()}
-            </span>
-            <div style={{ ...urduFont, fontSize: 13, color: "#444", textAlign: "right" }}>
-              <div style={{ fontWeight: 600, marginBottom: 2 }}>وزن کی تفصیل</div>
-              <div>گھی {totals.gheeWeight.toFixed(2)} کلوگرام</div>
-              <div>تیل {totals.oilWeight.toFixed(2)} کلوگرام</div>
-              <div>آر ایس او {totals.rsoWeight.toFixed(2)} کلوگرام</div>
-              <div>صابن {totals.soapWeight.toFixed(2)} کلوگرام</div>
+          <div style={summaryCardStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 600, color: "#0b2b5b", marginBottom: 8 }}>
+              <span>Total Amount</span>
+              <span>{totals.amount.toLocaleString()}</span>
+            </div>
+
+            <div style={summaryRowStyle}>
+              <span>Weight (Ghee)</span>
+              <strong>{totals.gheeWeight.toFixed(2)} kg</strong>
+            </div>
+            <div style={summaryRowStyle}>
+              <span>Weight (Oil)</span>
+              <strong>{totals.oilWeight.toFixed(2)} kg</strong>
+            </div>
+            <div style={summaryTotalBarStyle}>
+              <span>Total Weight (Ton)</span>
+              <strong>{totals.totalTon.toFixed(3)}</strong>
+            </div>
+
+            <div style={summaryRowStyle}>
+              <span>Weight (RSO)</span>
+              <strong>{totals.rsoWeight.toFixed(2)} kg</strong>
+            </div>
+            <div style={summaryRowStyle}>
+              <span>Weight (SOAP)</span>
+              <strong>{totals.soapWeight.toFixed(2)} kg</strong>
+            </div>
+            <div style={summaryGrandTotalBarStyle}>
+              <span>G.Total Weight (Ton)</span>
+              <strong>{totals.grandTotalTon.toFixed(3)}</strong>
             </div>
           </div>
           </div>
@@ -583,4 +656,44 @@ const qtyOptionButtonStyle: React.CSSProperties = {
   background: "#fff",
   borderRadius: 8,
   cursor: "pointer",
+};
+
+const summaryCardStyle: React.CSSProperties = {
+  marginTop: 12,
+  padding: "12px 14px",
+  background: "#fafbfd",
+  border: "1px solid #e6e9ef",
+  borderRadius: 10,
+};
+
+const summaryRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  fontSize: 13,
+  color: "#444",
+  padding: "2px 0",
+};
+
+const summaryTotalBarStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  fontSize: 13,
+  fontWeight: 700,
+  color: "#0b2b5b",
+  background: "#eef3fb",
+  borderRadius: 6,
+  padding: "6px 8px",
+  margin: "6px 0 10px",
+};
+
+const summaryGrandTotalBarStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  fontSize: 14,
+  fontWeight: 700,
+  color: "#8a4b00",
+  background: "#fff4e0",
+  borderRadius: 6,
+  padding: "7px 8px",
+  marginTop: 6,
 };
