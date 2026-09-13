@@ -5,17 +5,14 @@ import ExcelJS from "exceljs";
 // Soft_copy.xlsx sample: a paired "Order ID" header (two merged cells,
 // same value, side by side) then a lean item table — Item No. / Item /
 // UoM Code / Quantity — listing only the items actually ordered.
-//
-// ASSUMPTION carried over from before: "UoM Code" isn't a field your
-// data model stores anywhere, so it's derived from the item name
-// ("LTR" if the name contains "Ltr", "KG" otherwise). Tell me the real
-// mapping if this is wrong.
+// UoM Code is always "Nos".
 function sanitizeSheetName(name: string): string {
   return name.replace(/[\[\]:*?/\\]/g, "-").slice(0, 31);
 }
 
-function uomFor(name: string): string {
-  return name.toLowerCase().includes("ltr") ? "LTR" : "KG";
+// UoM Code is fixed at "Nos" for every row.
+function uomFor(_name: string): string {
+  return "Nos";
 }
 
 export function buildSoftCopyWorkbook(orders: any[], itemNumberById: Map<string, string | null>): ExcelJS.Workbook {

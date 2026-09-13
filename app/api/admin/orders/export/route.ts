@@ -28,9 +28,8 @@ export async function POST(req: NextRequest) {
 
     const { catalogItems, discountByTownId } = await fetchWorkbookLookups(supabaseServer, orders);
     const itemNumberById = new Map<string, string | null>(catalogItems.map((it: any) => [it.id, it.item_number ?? null] as [string, string | null]));
-    const catalogWeightById = new Map<string, number>(catalogItems.map((it: any) => [it.id, it.weight_kg] as [string, number]));
 
-    const pdfBuffer = await buildOrderBookPdf(orders, catalogWeightById, discountByTownId);
+    const pdfBuffer = await buildOrderBookPdf(orders, catalogItems, discountByTownId);
     const workbook = buildSoftCopyWorkbook(orders, itemNumberById);
     const xlsxBuffer = await workbook.xlsx.writeBuffer();
 
