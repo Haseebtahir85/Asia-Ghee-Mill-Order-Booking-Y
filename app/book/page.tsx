@@ -74,19 +74,37 @@ function getIconKind(item: Item): IconKind {
   return "bucket";
 }
 
-// Some items come in two rival pack counts for the same base weight/volume
-// (e.g. "1 Kg 12 Pack" vs "1 Kg 10 Pack", or "1 Ltr. 10 Pack") — only one of
-// a pair should ever be ordered at once. This pulls out a group key made of
-// the number ("1", "1/2", "1/4") plus its unit (kg or ltr), so items are
-// only compared against same-weight, same-unit rivals — regardless of
-// exact spacing/punctuation in the name ("Ltr.", "Ltr", "L").
-function getPackGroupKey(item: Item): string | null {
+// "10 Pack" and "12 Pack" are two rival packaging lines that scale together
+// across weights — "1 Kg 10 Pack", "1/2 Kg 20 Pack", "1/4 Kg 40 Pack" and
+// "1 Ltr. 10 Pack" are all the "10" family (pack count × weight ≈ 10);
+// "1 Kg 12 Pack", "1/2 Kg 24 Pack", "1/4 Kg 48 Pack" are the "12" family
+// (pack count × weight ≈ 12). The two families can never be ordered
+// together anywhere in the same bill. "5 Pack" items (pack count × weight
+// ≈ 5) fall outside both families and are never restricted.
+function parseWeightValue(numStr: string): number {
+  if (numStr.includes("/")) {
+    const [a, b] = numStr.split("/").map(Number);
+    return b ? a / b : NaN;
+  }
+  return Number(numStr);
+}
+
+function getPackFamily(item: Item): 10 | 12 | null {
   const name = item.name.toLowerCase();
   if (!name.includes("pack")) return null;
-  const match = name.match(/(\d+(?:\/\d+)?)\s*(kg|ltr\.?|l\b)/i);
-  if (!match) return null;
-  const unit = match[2].replace(/\./g, "").startsWith("l") ? "ltr" : "kg";
-  return `${match[1]}-${unit}`;
+
+  const weightMatch = name.match(/(\d+(?:\/\d+)?)\s*(kg|ltr\.?|l\b)/i);
+  const countMatch = name.match(/(\d+)\s*pack/i);
+  if (!weightMatch || !countMatch) return null;
+
+  const weightVal = parseWeightValue(weightMatch[1]);
+  const packCount = parseInt(countMatch[1], 10);
+  if (!weightVal || !packCount) return null;
+
+  const baseCount = Math.round(packCount * weightVal * 1000) / 1000;
+  if (Math.abs(baseCount - 10) < 0.01) return 10;
+  if (Math.abs(baseCount - 12) < 0.01) return 12;
+  return null;
 }
 
 const QTY_OPTIONS = [1, 2, 3, 4];
@@ -180,23 +198,16 @@ export default function BookPage() {
     return { amount, weight, gheeWeight, oilWeight, rsoWeight, soapWeight, totalTon, grandTotalTon };
   }, [rows]);
 
-  // Rival pack-size items (same weight, different pack count) — flag any
-  // item whose group has more than one entry with a qty entered.
+  // Global rule: the "10 Pack" family and "12 Pack" family can never both
+  // be active in the same order, regardless of weight — flag every active
+  // item from both families the moment both are present at once.
   const conflictItemIds = useMemo(() => {
-    const groups: Record<string, typeof rows> = {};
-    for (const r of rows) {
-      const key = getPackGroupKey(r.item);
-      if (!key) continue;
-      (groups[key] ||= []).push(r);
+    const tenActive = rows.filter((r) => getPackFamily(r.item) === 10 && r.qty > 0);
+    const twelveActive = rows.filter((r) => getPackFamily(r.item) === 12 && r.qty > 0);
+    if (tenActive.length > 0 && twelveActive.length > 0) {
+      return new Set([...tenActive, ...twelveActive].map((r) => r.item.id));
     }
-    const conflicts = new Set<string>();
-    for (const key in groups) {
-      const active = groups[key].filter((r) => r.qty > 0);
-      if (active.length > 1) {
-        active.forEach((r) => conflicts.add(r.item.id));
-      }
-    }
-    return conflicts;
+    return new Set<string>();
   }, [rows]);
 
   // Pop up the conflict warning the moment a new conflicting pair appears —
@@ -244,7 +255,7 @@ export default function BookPage() {
     }
 
     if (conflictItemIds.size > 0) {
-      setError("صرف ایک پیک سائز منتخب کریں — ایک ہی وزن کے دو مختلف پیک ایک ساتھ نہیں لیے جا سکتے۔");
+      setError("آپ 10 پیک اور 12 پیک ایک ساتھ نہیں لے سکتے — صرف ایک قسم منتخب کریں۔");
       return;
     }
 
@@ -446,16 +457,19 @@ export default function BookPage() {
           </div>
 
           <div style={summaryCardStyle}>
-            <div style={summaryTotalBarStyle}>
-              <span>Total Weight (Ton)</span>
-              <strong>{totals.totalTon.toFixed(3)}</strong>
-            </div>
-
-            <div style={summaryLineStyle}>
-              <span>Weight (Ghee) {totals.gheeWeight.toFixed(2)} kg</span>
-              <span>Weight (Oil) {totals.oilWeight.toFixed(2)} kg</span>
-              <span>Weight (RSO) {totals.rsoWeight.toFixed(2)} kg</span>
-              <span>Weight (SOAP) {totals.soapWeight.toFixed(2)} kg</span>
+            <div style={statsRowStyle}>
+              {[
+                { label: "Weight (Ghee)", value: `${totals.gheeWeight.toFixed(2)} kg` },
+                { label: "Weight (Oil)", value: `${totals.oilWeight.toFixed(2)} kg` },
+                { label: "Weight (RSO)", value: `${totals.rsoWeight.toFixed(2)} kg` },
+                { label: "Weight (SOAP)", value: `${totals.soapWeight.toFixed(2)} kg` },
+              ].map((stat, idx) => (
+                <div key={stat.label} style={{ ...statCellStyle, borderLeft: idx === 0 ? "none" : "1px solid #d8dde6" }}>
+                  <div style={statLabelStyle}>{stat.label}</div>
+                  <div style={statDividerStyle} />
+                  <div style={statValueStyle}>{stat.value}</div>
+                </div>
+              ))}
             </div>
 
             <div style={summaryGrandTotalBarStyle}>
@@ -518,7 +532,7 @@ export default function BookPage() {
         <div style={modalOverlayStyle} onClick={() => setConflictModalNames(null)}>
           <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
             <p style={{ ...urduFont, fontSize: 15, color: "#d62828", margin: "0 0 12px", textAlign: "right", lineHeight: 1.7 }}>
-              صرف ایک پیک سائز منتخب کریں — ایک ہی وزن کے دو مختلف پیک ایک ساتھ نہیں لیے جا سکتے۔
+              آپ 10 پیک اور 12 پیک ایک ساتھ نہیں لے سکتے — صرف ایک قسم منتخب کریں۔
             </p>
             <ul style={{ margin: "0 0 16px", paddingLeft: 18, fontSize: 13, color: "#444" }}>
               {conflictModalNames.map((name) => (
@@ -695,25 +709,43 @@ const summaryCardStyle: React.CSSProperties = {
   borderRadius: 10,
 };
 
-const summaryLineStyle: React.CSSProperties = {
+const statsRowStyle: React.CSSProperties = {
   display: "flex",
-  flexWrap: "wrap",
-  justifyContent: "space-between",
-  gap: "4px 10px",
-  fontSize: 12.5,
-  color: "#444",
-  padding: "8px 0",
+  background: "#fff",
+  border: "1px solid #e6e9ef",
+  borderRadius: 8,
+  overflow: "hidden",
+  marginBottom: 10,
 };
 
-const summaryTotalBarStyle: React.CSSProperties = {
+const statCellStyle: React.CSSProperties = {
+  flex: 1,
   display: "flex",
-  justifyContent: "space-between",
-  fontSize: 13,
+  flexDirection: "column",
+  alignItems: "center",
+  padding: "8px 4px",
+  minWidth: 0,
+};
+
+const statLabelStyle: React.CSSProperties = {
+  fontSize: 10.5,
+  fontWeight: 600,
+  color: "#666",
+  textAlign: "center",
+  lineHeight: 1.2,
+};
+
+const statDividerStyle: React.CSSProperties = {
+  width: "60%",
+  height: 1,
+  background: "#d8dde6",
+  margin: "5px 0",
+};
+
+const statValueStyle: React.CSSProperties = {
+  fontSize: 12.5,
   fontWeight: 700,
   color: "#0b2b5b",
-  background: "#eef3fb",
-  borderRadius: 6,
-  padding: "6px 8px",
 };
 
 const summaryGrandTotalBarStyle: React.CSSProperties = {
