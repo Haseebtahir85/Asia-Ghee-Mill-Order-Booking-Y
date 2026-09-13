@@ -3,6 +3,10 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+const NAVY = "#0b2b5b";
+const YELLOW = "#F6C90E";
+const RED = "#D62828";
+
 export default function AdminLoginPage() {
   return (
     <Suspense fallback={null}>
@@ -43,55 +47,120 @@ function AdminLoginForm() {
   }
 
   return (
-    <main style={{ maxWidth: 360, margin: "80px auto", fontFamily: "system-ui, sans-serif" }}>
-      <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 16 }}>Admin Login</h1>
-      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ position: "relative" }}>
-          <input
-            type={showPassword ? "text" : "password"}
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "8px 40px 8px 10px",
-              border: "1px solid #ccc",
-              borderRadius: 6,
-              boxSizing: "border-box",
-            }}
-            autoFocus
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: `linear-gradient(180deg, ${NAVY} 0%, #133a75 45%, #eef2f7 45%, #eef2f7 100%)`,
+        fontFamily: "system-ui, sans-serif",
+        padding: 16,
+      }}
+    >
+      <main
+        style={{
+          width: "100%",
+          maxWidth: 380,
+          background: "#fff",
+          borderRadius: 16,
+          boxShadow: "0 12px 32px rgba(11,43,91,0.18)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            background: NAVY,
+            padding: "28px 24px 22px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 10,
+            borderBottom: `3px solid ${YELLOW}`,
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo.jpg"
+            alt="ASIA GHEE MILLS (Pvt.) Ltd."
+            style={{ width: 56, height: 56, borderRadius: 10, objectFit: "cover", background: "#fff" }}
           />
+          <div style={{ textAlign: "center" }}>
+            <h1 style={{ fontSize: 16, fontWeight: 700, color: "#fff", margin: 0, letterSpacing: 0.3 }}>
+              ASIA GHEE MILLS (Pvt.) Ltd.
+            </h1>
+            <p style={{ fontSize: 12, color: "#c9d6ec", margin: "2px 0 0" }}>Admin Login</p>
+          </div>
+        </div>
+
+        <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14, padding: "24px" }}>
+          <div style={{ position: "relative" }}>
+            <input
+              type={showPassword ? "text" : "password"}
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "10px 42px 10px 12px",
+                border: "1px solid #d5dbe6",
+                borderRadius: 8,
+                boxSizing: "border-box",
+                fontSize: 14,
+                outline: "none",
+              }}
+              onFocus={(e) => (e.currentTarget.style.borderColor = NAVY)}
+              onBlur={(e) => (e.currentTarget.style.borderColor = "#d5dbe6")}
+              autoFocus
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              title={showPassword ? "Hide password" : "Show password"}
+              style={{
+                position: "absolute",
+                right: 8,
+                top: "50%",
+                transform: "translateY(-50%)",
+                border: "none",
+                background: "none",
+                cursor: "pointer",
+                padding: 4,
+                display: "flex",
+                color: "#888",
+              }}
+            >
+              {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+            </button>
+          </div>
+
+          {error && (
+            <div style={{ color: RED, fontSize: 13, background: "#fdecec", border: "1px solid #f6c9c9", borderRadius: 6, padding: "6px 10px" }}>
+              {error}
+            </div>
+          )}
+
           <button
-            type="button"
-            onClick={() => setShowPassword((v) => !v)}
-            aria-label={showPassword ? "Hide password" : "Show password"}
-            title={showPassword ? "Hide password" : "Show password"}
+            type="submit"
+            disabled={submitting}
             style={{
-              position: "absolute",
-              right: 8,
-              top: "50%",
-              transform: "translateY(-50%)",
+              padding: "10px 16px",
+              background: NAVY,
+              color: "#fff",
               border: "none",
-              background: "none",
-              cursor: "pointer",
-              padding: 4,
-              display: "flex",
-              color: "#666",
+              borderRadius: 8,
+              cursor: submitting ? "default" : "pointer",
+              fontSize: 14,
+              fontWeight: 600,
+              opacity: submitting ? 0.7 : 1,
             }}
           >
-            {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+            {submitting ? "Signing in..." : "Sign in"}
           </button>
-        </div>
-        {error && <div style={{ color: "#b00020", fontSize: 13 }}>{error}</div>}
-        <button
-          type="submit"
-          disabled={submitting}
-          style={{ padding: "8px 16px", background: "#111", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}
-        >
-          {submitting ? "Signing in..." : "Sign in"}
-        </button>
-      </form>
-    </main>
+        </form>
+      </main>
+    </div>
   );
 }
 
