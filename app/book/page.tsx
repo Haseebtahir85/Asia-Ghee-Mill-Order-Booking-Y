@@ -6,26 +6,33 @@ import { Item, Town } from "@/lib/types";
 import styles from "./book.module.css";
 
 function townLabel(t: Town): string {
-  return t.upc ? `${t.name} (${t.upc})` : t.name;
+  return t.name;
+}
+
+function townMatches(t: Town, query: string): boolean {
+  const q = query.toLowerCase();
+  if (t.name.toLowerCase().includes(q)) return true;
+  if (t.upc && t.upc.toLowerCase().includes(q)) return true;
+  if (t.group_no != null && String(t.group_no).toLowerCase().includes(q)) return true;
+  return false;
 }
 
 function getPakistanTimeString() {
   // Always computed against Asia/Karachi, regardless of the device's own timezone/clock settings.
   const now = new Date();
+  const timePart = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Karachi",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  }).format(now);
   const datePart = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Karachi",
     day: "2-digit",
     month: "short",
     year: "numeric",
   }).format(now);
-  const timePart = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Karachi",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  }).format(now);
-  return `${datePart}, ${timePart} PKT`;
+  return `${timePart}, ${datePart}`;
 }
 
 // Icon is the admin's explicit choice (item.icon) when one is set.
@@ -144,8 +151,7 @@ export default function BookPage() {
       setShowTownDropdown(false);
       return;
     }
-    const lower = value.toLowerCase();
-    const matches = towns.filter((t) => townLabel(t).toLowerCase().includes(lower)).slice(0, 8);
+    const matches = towns.filter((t) => townMatches(t, value)).slice(0, 8);
     setTownSuggestions(matches);
     setShowTownDropdown(true);
   }
@@ -233,7 +239,9 @@ export default function BookPage() {
             <div style={{ gridColumn: "1 / -1", position: "relative", zIndex: 50 }} ref={townBoxRef}>
               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
                 <label className={styles.fieldLabel}>Town</label>
-                <span style={{ fontSize: 12, color: "#666", fontVariantNumeric: "tabular-nums" }}>{pkTime}</span>
+                <span style={{ fontSize: 12, color: "#666", fontVariantNumeric: "tabular-nums" }}>
+                  Current Time / Date: {pkTime}
+                </span>
               </div>
               <div style={{ position: "relative" }}>
                 <input
