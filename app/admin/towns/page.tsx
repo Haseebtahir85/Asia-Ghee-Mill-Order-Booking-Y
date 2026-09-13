@@ -17,7 +17,23 @@ type TownWithDiscount = Town & { discount: number | null };
 const emptyForm = { name: "", group_no: "", upc: "", discount: "" };
 
 // Excel column headers, in the exact order they're written and read back.
-const EXCEL_HEADERS = ["Name", "Group No", "Code", "Discount", "Status"] as const;
+// ID is included so renamed rows still match back to the right town —
+// matching by name text alone can't survive a rename.
+const EXCEL_HEADERS = ["ID", "Name", "Group No", "Code", "Discount", "Status"] as const;
+
+type PendingChange = {
+  townId: string;
+  townLabel: string;
+  field: "Name" | "Group No" | "Code";
+  oldValue: string;
+  newValue: string;
+};
+
+type PendingImport = {
+  patches: { id: string; patch: Partial<TownWithDiscount> }[];
+  changes: PendingChange[];
+  skipped: number;
+};
 
 export default function AdminTownsPage() {
   const [towns, setTowns] = useState<TownWithDiscount[]>([]);
@@ -26,6 +42,7 @@ export default function AdminTownsPage() {
   const [error, setError] = useState<string | null>(null);
   const [excelStatus, setExcelStatus] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function loadTowns() {
@@ -99,10 +116,12 @@ export default function AdminTownsPage() {
   }
 
   // Builds an .xlsx of the current towns list so the admin can edit values
-  // in Excel and re-upload it. Loaded dynamically since it's client-only.
+  // in Excel and re-upload it. The ID column is included so a renamed row
+  // still matches back to the right town — don't delete/edit that column.
   async function downloadTemplate() {
     const XLSX = await import("xlsx");
     const rows = towns.map((t) => ({
+      ID: t.id,
       Name: t.name,
       "Group No": t.group_no ?? "",
       Code: t.upc ?? "",
@@ -119,10 +138,28 @@ export default function AdminTownsPage() {
     fileInputRef.current?.click();
   }
 
+  async function applyPatches(patches: { id: string; patch: Partial<TownWithDiscount> }[]) {
+    for (const { id, patch } of patches) {
+      await fetch(`/api/admin/towns/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+    }
+  }
+
   // Reads the uploaded workbook, matches each row to an existing town by
-  // name (case-insensitive, whitespace-trimmed), and PATCHes every field
-  // present in that row. Rows whose name doesn't match any town are
-  // skipped and counted, not silently dropped.
+  // ID (falling back to name, case-insensitive, if ID is missing), and
+  // compares Name / Group No / Code against the current values.
+  //
+  // - If none of those three changed anywhere in the file: Discount (and
+  //   Status) changes apply immediately — no confirmation needed.
+  // - If any of Name / Group No / Code changed for any row: nothing is
+  //   applied yet. A confirmation popup lists every affected Name/Group
+  //   No/Code change (Discount changes are never listed there, even
+  //   though they ride along in the same batch). Cancel applies nothing
+  //   at all — including any Discount-only changes in the same upload.
+  //   Overwrite applies everything at once.
   async function handleExcelFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ""; // allow re-selecting the same file later
@@ -139,18 +176,19 @@ export default function AdminTownsPage() {
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet);
 
+      const byId = new Map(towns.map((t) => [t.id, t]));
       const byLowerName = new Map(towns.map((t) => [t.name.trim().toLowerCase(), t]));
 
-      let updated = 0;
+      const patches: { id: string; patch: Partial<TownWithDiscount> }[] = [];
+      const changes: PendingChange[] = [];
       let skipped = 0;
 
       for (const row of rows) {
+        const rowId = String(row["ID"] ?? row["id"] ?? "").trim();
         const rawName = String(row["Name"] ?? row["name"] ?? "").trim();
-        if (!rawName) {
-          skipped++;
-          continue;
-        }
-        const match = byLowerName.get(rawName.toLowerCase());
+
+        let match = rowId ? byId.get(rowId) : undefined;
+        if (!match && rawName) match = byLowerName.get(rawName.toLowerCase());
         if (!match) {
           skipped++;
           continue;
@@ -158,41 +196,78 @@ export default function AdminTownsPage() {
 
         const patch: Partial<TownWithDiscount> = {};
 
-        const groupNoRaw = row["Group No"] ?? row["group_no"];
-        if (groupNoRaw !== undefined && groupNoRaw !== "") {
-          patch.group_no = parseInt(String(groupNoRaw), 10);
-        } else if (groupNoRaw === "") {
-          patch.group_no = null;
+        // Name
+        if (rawName && rawName !== match.name.trim()) {
+          patch.name = rawName;
+          changes.push({ townId: match.id, townLabel: match.name, field: "Name", oldValue: match.name, newValue: rawName });
         }
 
+        // Group No
+        const groupNoRaw = row["Group No"] ?? row["group_no"];
+        if (groupNoRaw !== undefined) {
+          const newGroupNo = groupNoRaw === "" ? null : parseInt(String(groupNoRaw), 10);
+          if (newGroupNo !== (match.group_no ?? null)) {
+            patch.group_no = newGroupNo;
+            changes.push({
+              townId: match.id,
+              townLabel: match.name,
+              field: "Group No",
+              oldValue: String(match.group_no ?? ""),
+              newValue: String(newGroupNo ?? ""),
+            });
+          }
+        }
+
+        // Code
         const codeRaw = row["Code"] ?? row["code"] ?? row["upc"];
         if (codeRaw !== undefined) {
-          patch.upc = String(codeRaw).trim() || null;
+          const newCode = String(codeRaw).trim() || null;
+          if (newCode !== (match.upc ?? null)) {
+            patch.upc = newCode;
+            changes.push({
+              townId: match.id,
+              townLabel: match.name,
+              field: "Code",
+              oldValue: match.upc ?? "",
+              newValue: newCode ?? "",
+            });
+          }
         }
 
+        // Discount — excepted from the confirmation gate: always included
+        // in the patch when changed, but never added to `changes`.
         const discountRaw = row["Discount"] ?? row["discount"];
-        if (discountRaw !== undefined && discountRaw !== "") {
-          patch.discount = parseFloat(String(discountRaw));
-        } else if (discountRaw === "") {
-          patch.discount = null;
+        if (discountRaw !== undefined) {
+          const newDiscount = discountRaw === "" ? null : parseFloat(String(discountRaw));
+          if (newDiscount !== (match.discount ?? null)) {
+            patch.discount = newDiscount;
+          }
         }
 
+        // Status — also applied directly, not gated.
         const statusRaw = String(row["Status"] ?? row["status"] ?? "").trim().toLowerCase();
-        if (statusRaw === "active") patch.is_active = true;
-        else if (statusRaw === "inactive") patch.is_active = false;
+        if (statusRaw === "active" && !match.is_active) patch.is_active = true;
+        else if (statusRaw === "inactive" && match.is_active) patch.is_active = false;
 
-        await fetch(`/api/admin/towns/${match.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(patch),
-        });
-        updated++;
+        if (Object.keys(patch).length > 0) {
+          patches.push({ id: match.id, patch });
+        }
       }
 
+      if (changes.length > 0) {
+        // Name/Group No/Code changed somewhere — hold everything for
+        // confirmation instead of applying it.
+        setPendingImport({ patches, changes, skipped });
+        setImporting(false);
+        return;
+      }
+
+      // Nothing gated changed — apply Discount/Status updates directly.
+      await applyPatches(patches);
       setExcelStatus(
         skipped > 0
-          ? `Updated ${updated} town${updated === 1 ? "" : "s"}, ${skipped} row${skipped === 1 ? "" : "s"} skipped (name not found).`
-          : `Updated ${updated} town${updated === 1 ? "" : "s"}.`
+          ? `Updated ${patches.length} town${patches.length === 1 ? "" : "s"}, ${skipped} row${skipped === 1 ? "" : "s"} skipped (not found).`
+          : `Updated ${patches.length} town${patches.length === 1 ? "" : "s"}.`
       );
       loadTowns();
     } catch (err: any) {
@@ -200,6 +275,27 @@ export default function AdminTownsPage() {
     } finally {
       setImporting(false);
     }
+  }
+
+  async function confirmOverwrite() {
+    if (!pendingImport) return;
+    setImporting(true);
+    await applyPatches(pendingImport.patches);
+    setExcelStatus(
+      pendingImport.skipped > 0
+        ? `Updated ${pendingImport.patches.length} town${pendingImport.patches.length === 1 ? "" : "s"}, ${pendingImport.skipped} row${pendingImport.skipped === 1 ? "" : "s"} skipped (not found).`
+        : `Updated ${pendingImport.patches.length} town${pendingImport.patches.length === 1 ? "" : "s"}.`
+    );
+    setPendingImport(null);
+    setImporting(false);
+    loadTowns();
+  }
+
+  function cancelImport() {
+    // Cancels everything in this batch, including any Discount-only
+    // changes that were riding along with the gated ones.
+    setPendingImport(null);
+    setExcelStatus("Import cancelled — no changes were made.");
   }
 
   return (
@@ -228,7 +324,7 @@ export default function AdminTownsPage() {
       </div>
 
       <p style={{ color: "#666", fontSize: 13, marginBottom: 8, marginLeft: 16 }}>
-        This list fills the Town dropdown on the public booking page.
+        This list fills the Town dropdown on the public booking page. The Excel template's ID column is used to match rows back to towns — don't edit or remove it.
       </p>
 
       {excelStatus && (
@@ -391,6 +487,45 @@ export default function AdminTownsPage() {
         </table>
         </div>
       )}
+
+      {pendingImport && (
+        <div style={modalOverlayStyle} onClick={cancelImport}>
+          <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontSize: 17, margin: "0 0 4px", color: NAVY }}>Confirm changes</h2>
+            <p style={{ fontSize: 13, color: "#666", margin: "0 0 14px" }}>
+              These Name / Group No / Code changes were found in the uploaded file. Review before overwriting.
+            </p>
+            <div style={{ maxHeight: 280, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 16 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "#f5f6f8", textAlign: "left" }}>
+                    <th style={{ padding: "6px 8px" }}>Town</th>
+                    <th style={{ padding: "6px 8px" }}>Field</th>
+                    <th style={{ padding: "6px 8px" }}>Old</th>
+                    <th style={{ padding: "6px 8px" }}>New</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingImport.changes.map((c, i) => (
+                    <tr key={i} style={{ borderTop: "1px solid #eee" }}>
+                      <td style={{ padding: "6px 8px" }}>{c.townLabel}</td>
+                      <td style={{ padding: "6px 8px" }}>{c.field}</td>
+                      <td style={{ padding: "6px 8px", color: "#888" }}>{c.oldValue || "—"}</td>
+                      <td style={{ padding: "6px 8px", color: NAVY, fontWeight: 600 }}>{c.newValue || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button type="button" onClick={cancelImport} style={secondaryButtonStyle}>Cancel</button>
+              <button type="button" onClick={confirmOverwrite} disabled={importing} style={buttonStyle}>
+                {importing ? "Overwriting..." : "Overwrite"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -440,3 +575,23 @@ const moveButtonStyle: React.CSSProperties = {
 
 const thStyle: React.CSSProperties = { padding: "9px 6px", fontSize: 13, color: "#fff", fontWeight: 700 };
 const tdStyle: React.CSSProperties = { padding: "6px 6px", fontSize: 13 };
+
+const modalOverlayStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.45)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 2000,
+  padding: 16,
+};
+
+const modalBoxStyle: React.CSSProperties = {
+  background: "#fff",
+  borderRadius: 12,
+  padding: 22,
+  width: "100%",
+  maxWidth: 560,
+  boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+};
