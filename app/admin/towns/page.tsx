@@ -3,10 +3,21 @@
 import { useEffect, useState } from "react";
 import { Town } from "@/lib/types";
 
-const emptyForm = { name: "", group_no: "", upc: "" };
+const NAVY = "#0b2b5b";
+const YELLOW = "#F6C90E";
+const RED = "#D62828";
+
+// NOTE: `discount` isn't on the Town type/table yet in what you shared —
+// this assumes a nullable numeric `discount` column exists (or will be
+// added) on the towns table, and that /api/admin/towns (POST) and
+// /api/admin/towns/[id] (PATCH) accept a `discount` field. If the column
+// name or type differs, tell me and I'll adjust the field name below.
+type TownWithDiscount = Town & { discount: number | null };
+
+const emptyForm = { name: "", group_no: "", upc: "", discount: "" };
 
 export default function AdminTownsPage() {
-  const [towns, setTowns] = useState<Town[]>([]);
+  const [towns, setTowns] = useState<TownWithDiscount[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +50,7 @@ export default function AdminTownsPage() {
         name: form.name,
         group_no: form.group_no ? parseInt(form.group_no, 10) : null,
         upc: form.upc || null,
+        discount: form.discount ? parseFloat(form.discount) : null,
       }),
     });
 
@@ -52,7 +64,7 @@ export default function AdminTownsPage() {
     loadTowns();
   }
 
-  async function updateTown(id: string, patch: Partial<Town>) {
+  async function updateTown(id: string, patch: Partial<TownWithDiscount>) {
     await fetch(`/api/admin/towns/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -81,47 +93,93 @@ export default function AdminTownsPage() {
   }
 
   return (
-    <main style={{ maxWidth: 700, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 16 }}>Towns</h1>
-      <p style={{ color: "#666", fontSize: 13, marginBottom: 16 }}>
+    <main style={{ maxWidth: 760, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif", background: "#fffdf5", minHeight: "100vh" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <div style={{ width: 6, height: 24, background: YELLOW, borderRadius: 3 }} />
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: NAVY, margin: 0 }}>Towns</h1>
+      </div>
+      <p style={{ color: "#666", fontSize: 13, marginBottom: 20, marginLeft: 16 }}>
         This list fills the Town dropdown on the public booking page.
       </p>
 
-      <form onSubmit={addTown} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: 10, marginBottom: 24 }}>
-        <input placeholder="Town name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
-        <input placeholder="Group No" type="number" value={form.group_no} onChange={(e) => setForm({ ...form, group_no: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
-        <input placeholder="Code" value={form.upc} onChange={(e) => setForm({ ...form, upc: e.target.value })} style={{ minWidth: 0, width: "100%", boxSizing: "border-box" }} />
+      <form
+        onSubmit={addTown}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "2fr 1fr 1fr 1fr auto",
+          gap: 10,
+          marginBottom: 24,
+          background: "#fff",
+          border: `1px solid ${YELLOW}`,
+          borderRadius: 10,
+          padding: 14,
+          boxShadow: "0 2px 8px rgba(11,43,91,0.06)",
+        }}
+      >
+        <input
+          placeholder="Town name"
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
+          style={inputStyle}
+        />
+        <input
+          placeholder="Group No"
+          type="number"
+          value={form.group_no}
+          onChange={(e) => setForm({ ...form, group_no: e.target.value })}
+          style={inputStyle}
+        />
+        <input
+          placeholder="Code"
+          value={form.upc}
+          onChange={(e) => setForm({ ...form, upc: e.target.value })}
+          style={inputStyle}
+        />
+        <input
+          placeholder="Discount"
+          type="number"
+          step="0.01"
+          value={form.discount}
+          onChange={(e) => setForm({ ...form, discount: e.target.value })}
+          style={inputStyle}
+        />
         <button type="submit" style={buttonStyle}>Add</button>
       </form>
 
-      {error && <div style={{ color: "#b00020", marginBottom: 12 }}>{error}</div>}
+      {error && (
+        <div style={{ color: RED, background: "#fdecec", border: "1px solid #f6c9c9", borderRadius: 6, padding: "6px 10px", marginBottom: 12, fontSize: 13 }}>
+          {error}
+        </div>
+      )}
 
       {loading ? (
         <p>Loading...</p>
       ) : (
-        <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", minWidth: 560, borderCollapse: "collapse" }}>
+        <div style={{ overflowX: "auto", border: `1px solid ${YELLOW}`, borderRadius: 10, background: "#fff" }}>
+        <table style={{ width: "100%", minWidth: 640, borderCollapse: "collapse" }}>
           <colgroup>
             <col style={{ width: 46 }} />
-            <col style={{ minWidth: 180 }} />
+            <col style={{ minWidth: 160 }} />
+            <col style={{ width: 90 }} />
             <col style={{ width: 90 }} />
             <col style={{ width: 90 }} />
             <col style={{ width: 90 }} />
             <col style={{ width: 70 }} />
           </colgroup>
           <thead>
-            <tr style={{ textAlign: "left", borderBottom: "2px solid #ddd" }}>
+            <tr style={{ textAlign: "left", background: NAVY }}>
               <th style={thStyle}></th>
               <th style={thStyle}>Name</th>
               <th style={thStyle}>Group No</th>
               <th style={thStyle}>Code</th>
+              <th style={thStyle}>Discount</th>
               <th style={thStyle}>Status</th>
               <th style={thStyle}></th>
             </tr>
           </thead>
           <tbody>
             {towns.map((town, index) => (
-              <tr key={town.id} style={{ borderBottom: "1px solid #eee" }}>
+              <tr key={town.id} style={{ borderBottom: `1px solid #f3e6b0` }}>
                 <td style={tdStyle}>
                   <button onClick={() => move(index, -1)} style={moveButtonStyle} title="Move up">↑</button>
                   <button onClick={() => move(index, 1)} style={moveButtonStyle} title="Move down">↓</button>
@@ -130,7 +188,9 @@ export default function AdminTownsPage() {
                   <input
                     defaultValue={town.name}
                     onBlur={(e) => e.target.value !== town.name && updateTown(town.id, { name: e.target.value })}
-                    style={{ width: "100%", minWidth: 160, border: "1px solid transparent", padding: 4, boxSizing: "border-box" }}
+                    style={{ width: "100%", minWidth: 160, border: "1px solid transparent", padding: 4, boxSizing: "border-box", borderRadius: 4 }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = YELLOW)}
+                    onBlurCapture={(e) => (e.currentTarget.style.borderColor = "transparent")}
                   />
                 </td>
                 <td style={tdStyle}>
@@ -141,14 +201,32 @@ export default function AdminTownsPage() {
                       const value = e.target.value === "" ? null : parseInt(e.target.value, 10);
                       if (value !== (town.group_no ?? null)) updateTown(town.id, { group_no: value });
                     }}
-                    style={{ width: "100%", border: "1px solid transparent", padding: 4, boxSizing: "border-box" }}
+                    style={{ width: "100%", border: "1px solid transparent", padding: 4, boxSizing: "border-box", borderRadius: 4 }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = YELLOW)}
+                    onBlurCapture={(e) => (e.currentTarget.style.borderColor = "transparent")}
                   />
                 </td>
                 <td style={tdStyle}>
                   <input
                     defaultValue={town.upc ?? ""}
                     onBlur={(e) => e.target.value !== (town.upc ?? "") && updateTown(town.id, { upc: e.target.value || null })}
-                    style={{ width: "100%", border: "1px solid transparent", padding: 4, boxSizing: "border-box" }}
+                    style={{ width: "100%", border: "1px solid transparent", padding: 4, boxSizing: "border-box", borderRadius: 4 }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = YELLOW)}
+                    onBlurCapture={(e) => (e.currentTarget.style.borderColor = "transparent")}
+                  />
+                </td>
+                <td style={tdStyle}>
+                  <input
+                    type="number"
+                    step="0.01"
+                    defaultValue={town.discount ?? ""}
+                    onBlur={(e) => {
+                      const value = e.target.value === "" ? null : parseFloat(e.target.value);
+                      if (value !== (town.discount ?? null)) updateTown(town.id, { discount: value });
+                    }}
+                    style={{ width: "100%", border: "1px solid transparent", padding: 4, boxSizing: "border-box", borderRadius: 4 }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = YELLOW)}
+                    onBlurCapture={(e) => (e.currentTarget.style.borderColor = "transparent")}
                   />
                 </td>
                 <td style={tdStyle}>
@@ -170,7 +248,7 @@ export default function AdminTownsPage() {
                   </button>
                 </td>
                 <td style={tdStyle}>
-                  <button onClick={() => deleteTown(town.id)} style={{ ...moveButtonStyle, color: "#b00020" }}>Delete</button>
+                  <button onClick={() => deleteTown(town.id)} style={{ ...moveButtonStyle, color: RED, borderColor: "#f0b8b8" }}>Delete</button>
                 </td>
               </tr>
             ))}
@@ -182,23 +260,36 @@ export default function AdminTownsPage() {
   );
 }
 
+const inputStyle: React.CSSProperties = {
+  minWidth: 0,
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "8px 10px",
+  border: "1px solid #d9dde6",
+  borderRadius: 6,
+  fontSize: 13,
+};
+
 const buttonStyle: React.CSSProperties = {
   padding: "8px 16px",
-  background: "#111",
+  background: NAVY,
   color: "#fff",
   border: "none",
   borderRadius: 6,
   cursor: "pointer",
+  fontWeight: 600,
 };
 
 const moveButtonStyle: React.CSSProperties = {
-  border: "1px solid #ccc",
+  border: `1px solid ${YELLOW}`,
   background: "#fff",
+  color: NAVY,
   borderRadius: 4,
   padding: "2px 8px",
   cursor: "pointer",
   marginRight: 4,
+  fontWeight: 600,
 };
 
-const thStyle: React.CSSProperties = { padding: "8px 6px", fontSize: 13 };
+const thStyle: React.CSSProperties = { padding: "9px 6px", fontSize: 13, color: "#fff", fontWeight: 700 };
 const tdStyle: React.CSSProperties = { padding: "6px 6px", fontSize: 13 };
