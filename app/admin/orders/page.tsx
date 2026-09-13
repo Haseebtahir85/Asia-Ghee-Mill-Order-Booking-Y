@@ -2,13 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Order, OrderStatus } from "@/lib/types";
+import { Order, OrderStatus, Town } from "@/lib/types";
 
 const NAVY = "#0b2b5b";
 const YELLOW = "#F6C90E";
 const RED = "#D62828";
 
-const STATUS_TABS: { value: OrderStatus; label: string }[] = [
+const STATUS_OPTIONS: { value: OrderStatus; label: string }[] = [
   { value: "pending", label: "Pending" },
   { value: "issue", label: "Issue" },
   { value: "done", label: "Done" },
@@ -22,15 +22,30 @@ const STATUS_STYLES: Record<OrderStatus, { color: string; background: string }> 
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [towns, setTowns] = useState<Town[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<OrderStatus>("pending");
+  const [statusFilter, setStatusFilter] = useState<OrderStatus | "">("");
+  const [townFilter, setTownFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    fetch("/api/admin/towns")
+      .then((res) => res.json())
+      .then((json) => setTowns(json.towns ?? []))
+      .catch(() => {});
+  }, []);
+
   async function loadOrders() {
     setLoading(true);
-    const params = new URLSearchParams({ status: statusFilter });
+    const params = new URLSearchParams();
+    if (statusFilter) params.set("status", statusFilter);
+    if (townFilter) params.set("town_id", townFilter);
+    if (dateFrom) params.set("from", dateFrom);
+    if (dateTo) params.set("to", dateTo);
     const res = await fetch(`/api/admin/orders?${params.toString()}`);
     const json = await res.json();
     setOrders(json.orders ?? []);
@@ -41,7 +56,7 @@ export default function AdminOrdersPage() {
     loadOrders();
     setSelected(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter]);
+  }, [statusFilter, townFilter, dateFrom, dateTo]);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -68,7 +83,15 @@ export default function AdminOrdersPage() {
   async function exportToExcel() {
     setExporting(true);
     setError(null);
-    const body = selected.size > 0 ? { ids: Array.from(selected) } : { status: statusFilter };
+    const body =
+      selected.size > 0
+        ? { ids: Array.from(selected) }
+        : {
+            status: statusFilter || undefined,
+            town_id: townFilter || undefined,
+            from: dateFrom || undefined,
+            to: dateTo || undefined,
+          };
 
     const res = await fetch("/api/admin/orders/export", {
       method: "POST",
@@ -104,29 +127,46 @@ export default function AdminOrdersPage() {
         <h1 style={{ fontSize: 22, fontWeight: 700, color: NAVY, margin: 0 }}>Orders</h1>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
-        <div style={{ display: "flex", gap: 6, background: "#fff", border: `1px solid ${YELLOW}`, borderRadius: 10, padding: 4 }}>
-          {STATUS_TABS.map((tab) => {
-            const active = statusFilter === tab.value;
-            return (
-              <button
-                key={tab.value}
-                onClick={() => setStatusFilter(tab.value)}
-                style={{
-                  padding: "6px 16px",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  border: "none",
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  color: active ? "#fff" : NAVY,
-                  background: active ? NAVY : "transparent",
-                }}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 12,
+          alignItems: "flex-end",
+          justifyContent: "space-between",
+          marginBottom: 16,
+          background: "#fff",
+          border: `1px solid ${YELLOW}`,
+          borderRadius: 10,
+          padding: 14,
+        }}
+      >
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <label style={labelStyle}>Status</label>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as OrderStatus | "")} style={filterInputStyle}>
+              <option value="">All</option>
+              {STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Town</label>
+            <select value={townFilter} onChange={(e) => setTownFilter(e.target.value)} style={filterInputStyle}>
+              <option value="">All towns</option>
+              {towns.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label style={labelStyle}>From</label>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={filterInputStyle} />
+          </div>
+
+          <div>
+            <label style={labelStyle}>To</label>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={filterInputStyle} />
+          </div>
         </div>
 
         <button onClick={exportToExcel} disabled={exporting || orders.length === 0} style={buttonStyle}>
@@ -144,7 +184,7 @@ export default function AdminOrdersPage() {
         <p>Loading...</p>
       ) : orders.length === 0 ? (
         <div style={{ padding: 32, textAlign: "center", color: "#888", background: "#fff", border: `1px solid ${YELLOW}`, borderRadius: 10 }}>
-          No orders in this status.
+          No orders match these filters.
         </div>
       ) : (
         <div style={{ overflowX: "auto", border: `1px solid ${YELLOW}`, borderRadius: 10, background: "#fff" }}>
@@ -187,7 +227,7 @@ export default function AdminOrdersPage() {
                         cursor: "pointer",
                       }}
                     >
-                      {STATUS_TABS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                      {STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                     </select>
                   </td>
                   <td style={tdStyle}>
@@ -203,6 +243,15 @@ export default function AdminOrdersPage() {
     </main>
   );
 }
+
+const labelStyle: React.CSSProperties = { display: "block", fontSize: 11, color: "#888", marginBottom: 3, fontWeight: 600 };
+
+const filterInputStyle: React.CSSProperties = {
+  padding: "6px 8px",
+  border: "1px solid #d9dde6",
+  borderRadius: 6,
+  fontSize: 13,
+};
 
 const buttonStyle: React.CSSProperties = {
   padding: "8px 16px",

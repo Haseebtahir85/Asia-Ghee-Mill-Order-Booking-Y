@@ -1,24 +1,22 @@
+// Destination: app/api/admin/orders/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase";
 
-// GET /api/admin/orders?status=&from=&to=&q=
+// GET /api/admin/orders — filterable list for the admin Orders page.
+// Query params (all optional): status, town_id, from (YYYY-MM-DD), to (YYYY-MM-DD)
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status");
+  const townId = searchParams.get("town_id");
   const from = searchParams.get("from");
   const to = searchParams.get("to");
-  const q = searchParams.get("q");
 
-  let query = supabaseServer
-    .from("orders")
-    .select("*")
-    .order("order_date", { ascending: false })
-    .order("created_at", { ascending: false });
+  let query = supabaseServer.from("orders").select("*").order("created_at", { ascending: false });
 
   if (status) query = query.eq("status", status);
+  if (townId) query = query.eq("town_id", townId);
   if (from) query = query.gte("order_date", from);
   if (to) query = query.lte("order_date", to);
-  if (q) query = query.or(`customer_name.ilike.%${q}%,order_number.ilike.%${q}%`);
 
   const { data, error } = await query;
 
