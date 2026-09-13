@@ -1,29 +1,25 @@
 // Destination: lib/ordersPdf.ts
 import PDFDocument from "pdfkit";
 
-// Builds the "Order Book" PDF as a set of independent, self-contained
-// slips arranged in a 2x2 grid per A4 landscape page — because the
-// printed sheet gets physically cut into pieces afterward, every
-// quadrant needs its OWN complete header (company name, Order #, Town,
-// Date) and its OWN summary tables, scaled to that quadrant's width —
-// nothing can span across a cut line.
+// Builds the "Order Book" PDF matching your actual template exactly:
+// two SEPARATE, self-contained tables per order (a bill/customer table
+// and a "Provisional Order" dispatch table), each with its own
+// complete header, compact/natural column widths (not stretched to
+// fill the page), and its own DISTINCT summary section written as a
+// plain label/value list (not a horizontal stat bar) — the two tables
+// show different totals, not duplicates of each other:
 //
-// Per page: 2 orders, each contributing one row of 2 quadrants —
-// left = customer/bill slip (Item / Qty / Rate / Amount / Type /
-// Weight (Ton)), right = dispatch/loading slip (Item / Type / Qty /
-// Dispatched). Dashed guide lines mark where to cut. Both quadrant
-// columns are scaled to use the real page width (not a narrow strip
-// with blank space beside it), and the number of order-rows per page
-// is computed from actual content height, so a slip is never split
-// across a page boundary.
+//   Bill table summary: Weight (Ton), Amount, then the full six-line
+//     breakdown — Weight (Ghee), Weight (Oil), Total Weight (Ton),
+//     Weight (RSO), Weight (SOAP), G.Total Weight (Ton).
+//   Provisional Order table summary: a compact 2x2 grid — Weight
+//     (Ghee) / RSO on one row, Weight (Oil) / Total on the next
+//     (Total = Ghee + Oil + RSO).
 //
-// Under each slip, two summary tables (both column-divided — label
-// above, thin rule, value below, vertical dividers, no merged cells):
-//   Table 1 ("simple bill"): Weight (Ghee) / Weight (Oil) /
-//     Total Weight (Ton) / Weight (RSO) / Weight (SOAP) /
-//     G.Total Weight (Ton)
-//   Table 2, headed "Provisional Order": Weight (Ghee) / Weight (Oil) /
-//     RSO / Total (Total = Ghee + Oil + RSO)
+// Every table lists the full catalog (blank rows for items not
+// ordered on this order), and dashed guide lines mark where the
+// printed sheet should be cut, since each table becomes a separate
+// physical slip.
 function weightCategory(name: string, type: string): "ghee" | "oil" | "rso" | "soap" | "other" {
   const n = name.toLowerCase();
   if (n.includes("rso")) return "rso";
@@ -36,13 +32,28 @@ function weightCategory(name: string, type: string): "ghee" | "oil" | "rso" | "s
 type CatalogItem = { id: string; name: string; weight_kg: number; type: string };
 
 const ROW_H = 5.6;
-const HEADER_H = 24;
+const HEADER_LINE_H = 8;
+const HEADER_LINES = 3; // company name / order# (+ "Provisional Order" for the right table) / town+date
 const PANEL_HEADER_H = 7;
-const TABLE_GAP = 3;
-const STAT_BAR_H = 11;
-const STAT_HEADING_H = 6;
-const TOTALS_LINE_H = 7;
-const BOTTOM_PADDING = 6;
+const KV_ROW_H = 6.5;
+const KV_GAP_H = 4;
+
+// Compact, fixed column widths — matching a normal spreadsheet's
+// natural width, not stretched to fill the page.
+const BILL_COLS = [
+  { label: "Item", w: 78 },
+  { label: "Qty", w: 22 },
+  { label: "Rate", w: 30 },
+  { label: "Amount", w: 38 },
+  { label: "Type", w: 26 },
+  { label: "Wt (Ton)", w: 40 },
+];
+const DISPATCH_COLS = [
+  { label: "Item", w: 78 },
+  { label: "Type", w: 26 },
+  { label: "Qty", w: 22 },
+  { label: "Dispatched", w: 40 },
+];
 
 export function buildOrderBookPdf(
   orders: any[],
@@ -50,7 +61,7 @@ export function buildOrderBookPdf(
   discountByTownId: Map<string, number>
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 14 });
+    const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 20 });
     const chunks: Buffer[] = [];
     doc.on("data", (c) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -61,71 +72,71 @@ export function buildOrderBookPdf(
     const pageLeft = doc.page.margins.left;
     const pageTop = doc.page.margins.top;
 
-    const colGap = 16;
-    const quadrantWidth = (pageWidth - colGap) / 2;
+    const billW = BILL_COLS.reduce((a, c) => a + c.w, 0);
+    const dispatchW = DISPATCH_COLS.reduce((a, c) => a + c.w, 0);
+    const colGap = 20;
 
-    // Slip height is the same for every slip (fixed catalog row count),
-    // so compute it once and derive how many order-rows fit per page.
+    // The bill table's summary is much taller (8 lines) than the
+    // Provisional Order table's (2 lines) — the row's total height is
+    // driven by the taller one; the shorter side just ends early.
     const itemRowsH = catalogItems.length * ROW_H;
-    const slipHeight =
-      HEADER_H +
-      PANEL_HEADER_H +
-      itemRowsH +
-      TABLE_GAP +
-      TOTALS_LINE_H +
-      STAT_BAR_H +
-      TABLE_GAP +
-      STAT_HEADING_H +
-      STAT_BAR_H +
-      BOTTOM_PADDING;
-    const rowGap = 10;
-    const ordersPerPage = Math.max(1, Math.floor((pageHeight + rowGap) / (slipHeight + rowGap)));
+    const headerH = HEADER_LINES * HEADER_LINE_H;
+    const billSummaryH = KV_ROW_H * 2 + KV_GAP_H + KV_ROW_H * 6; // Weight/Amount, gap, 6-line breakdown
+    const dispatchSummaryH = KV_ROW_H * 4; // Ghee / Oil / RSO / Total, one per line
+    const slipContentH = headerH + PANEL_HEADER_H + itemRowsH + 4;
+    const rowHeight = slipContentH + Math.max(billSummaryH, dispatchSummaryH) + 6;
+    const rowGap = 14;
+    const ordersPerPage = Math.max(1, Math.floor((pageHeight + rowGap) / (rowHeight + rowGap)));
 
-    function drawStatBar(x: number, width: number, barTop: number, stats: { label: string; value: string }[]) {
-      const cellW = width / stats.length;
-      doc.rect(x, barTop, width, STAT_BAR_H).strokeColor("#0b2b5b").lineWidth(0.5).stroke();
-      stats.forEach((s, i) => {
-        const cx = x + i * cellW;
-        if (i > 0) doc.moveTo(cx, barTop).lineTo(cx, barTop + STAT_BAR_H).strokeColor("#cfd6e4").lineWidth(0.5).stroke();
-        doc.font("Helvetica-Bold").fontSize(4.4).fillColor("#666").text(s.label, cx + 2, barTop + 1.3, { width: cellW - 4, align: "center" });
-        doc.font("Helvetica-Bold").fontSize(6).fillColor("#0b2b5b").text(s.value, cx + 2, barTop + 6.2, { width: cellW - 4, align: "center" });
-      });
-      doc.fillColor("#000");
+    // One label/value line — plain text, no bar, no merged cells.
+    function drawKV(x: number, y: number, width: number, label: string, value: string, bold = false) {
+      doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(5.6);
+      doc.text(label, x, y, { width: width * 0.62 });
+      doc.font("Helvetica-Bold").fontSize(5.6);
+      doc.text(value, x + width * 0.62, y, { width: width * 0.38, align: "right" });
     }
 
-    // Draws one fully self-contained slip: own header, own single table
-    // (either the customer/bill columns or the dispatch columns), own
-    // two summary tables — everything scaled to `width`, nothing shared
-    // with the slip beside it.
-    function drawSlip(
+    function drawTable(
       order: any,
       kind: "bill" | "dispatch",
       x: number,
       top: number,
-      width: number,
       discount: number
     ) {
       let y = top;
+      const cols = kind === "bill" ? BILL_COLS : DISPATCH_COLS;
+      const width = cols.reduce((a, c) => a + c.w, 0);
 
       doc.font("Helvetica-Bold").fontSize(7.5).text("ASIA GHEE MILLS (Pvt.) Ltd.", x, y, { width, align: "center" });
-      y += 9;
-      doc.fontSize(7).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
-      doc.fillColor("#000");
-      y += 8;
-      doc.font("Helvetica").fontSize(5.5).fillColor("#555").text(`Town: ${order.town ?? ""}    Date: ${order.order_date}`, x, y, { width, align: "center" });
-      doc.fillColor("#000");
-      y += 7;
+      y += HEADER_LINE_H;
+      if (kind === "dispatch") {
+        doc.fontSize(6.5).fillColor("#c0392b").text("Provisional Order", x, y, { width, align: "center" });
+        doc.fillColor("#000");
+      } else {
+        doc.fontSize(6.5).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
+        doc.fillColor("#000");
+      }
+      y += HEADER_LINE_H;
+      if (kind === "dispatch") {
+        doc.font("Helvetica").fontSize(5.5).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
+        doc.fillColor("#000");
+      } else {
+        doc.font("Helvetica").fontSize(5.2).fillColor("#555").text(`Town: ${order.town ?? ""}    Date: ${order.order_date}`, x, y, { width, align: "center" });
+        doc.fillColor("#000");
+      }
+      y += HEADER_LINE_H;
+      if (kind === "dispatch") {
+        doc.font("Helvetica").fontSize(5.2).fillColor("#555").text(`Town: ${order.town ?? ""}    Date: ${order.order_date}`, x, y, { width, align: "center" });
+        doc.fillColor("#000");
+        y += HEADER_LINE_H;
+      }
 
-      const isBill = kind === "bill";
-      const colWeights = isBill ? [0.42, 0.1, 0.13, 0.15, 0.1, 0.1] : [0.5, 0.16, 0.14, 0.2];
-      const headers = isBill ? ["Item", "Qty", "Rate", "Amount", "Type", "Wt (Ton)"] : ["Item", "Type", "Qty", "Dispatched"];
-      const colW = colWeights.map((w) => w * width);
-      const colX = [x];
-      for (let i = 0; i < colW.length - 1; i++) colX.push(colX[i] + colW[i]);
+      const colX: number[] = [x];
+      for (let i = 0; i < cols.length - 1; i++) colX.push(colX[i] + cols[i].w);
 
       doc.font("Helvetica-Bold").fontSize(5.5);
-      headers.forEach((h, i) => {
-        doc.text(h, colX[i], y, { width: colW[i], align: i === 0 ? "left" : "center" });
+      cols.forEach((c, i) => {
+        doc.text(c.label, colX[i], y, { width: c.w, align: i === 0 ? "left" : "center" });
       });
       y += 7;
       doc.moveTo(x, y).lineTo(x + width, y).strokeColor("#0b2b5b").lineWidth(0.75).stroke();
@@ -158,79 +169,81 @@ export function buildOrderBookPdf(
           else if (category === "soap") soapTon += weightTon;
         }
 
-        if (isBill) {
-          doc.text(item.name, colX[0], y, { width: colW[0] });
-          doc.text(qty ? String(qty) : "", colX[1], y, { width: colW[1], align: "center" });
-          doc.text(qty ? String(rate) : "", colX[2], y, { width: colW[2], align: "center" });
-          doc.text(qty ? Math.round(amount).toLocaleString() : "", colX[3], y, { width: colW[3], align: "center" });
-          doc.text(item.type, colX[4], y, { width: colW[4], align: "center" });
-          doc.text(qty ? weightTon.toFixed(3) : "", colX[5], y, { width: colW[5], align: "center" });
+        if (kind === "bill") {
+          doc.text(item.name, colX[0], y, { width: cols[0].w });
+          doc.text(qty ? String(qty) : "", colX[1], y, { width: cols[1].w, align: "center" });
+          doc.text(qty ? String(rate) : "", colX[2], y, { width: cols[2].w, align: "center" });
+          doc.text(qty ? Math.round(amount).toLocaleString() : "", colX[3], y, { width: cols[3].w, align: "center" });
+          doc.text(item.type, colX[4], y, { width: cols[4].w, align: "center" });
+          doc.text(qty ? weightTon.toFixed(3) : "", colX[5], y, { width: cols[5].w, align: "center" });
         } else {
-          doc.text(item.name, colX[0], y, { width: colW[0] });
-          doc.text(item.type, colX[1], y, { width: colW[1], align: "center" });
-          doc.text(qty ? String(qty) : "", colX[2], y, { width: colW[2], align: "center" });
+          doc.text(item.name, colX[0], y, { width: cols[0].w });
+          doc.text(item.type, colX[1], y, { width: cols[1].w, align: "center" });
+          doc.text(qty ? String(qty) : "", colX[2], y, { width: cols[2].w, align: "center" });
           // Dispatched intentionally left blank for manual check-off.
         }
 
         y += ROW_H;
       }
 
+      y += 3;
       const totalTon = gheeTon + oilTon;
       const grandTotalTon = totalTon + rsoTon + soapTon;
       const provisionalTotal = gheeTon + oilTon + rsoTon;
 
-      y += 2;
-      doc.font("Helvetica-Bold").fontSize(5.5);
-      doc.text(`Weight (Ton): ${grandTotalTon.toFixed(3)}`, x, y, { width: width / 2 });
-      doc.text(`Amount: ${Math.round(totalAmount).toLocaleString()}`, x + width / 2, y, { width: width / 2, align: "right" });
-      y += TOTALS_LINE_H;
-
-      drawStatBar(x, width, y, [
-        { label: "Weight (Ghee)", value: gheeTon.toFixed(3) },
-        { label: "Weight (Oil)", value: oilTon.toFixed(3) },
-        { label: "Total Wt (Ton)", value: totalTon.toFixed(3) },
-        { label: "Weight (RSO)", value: rsoTon.toFixed(3) },
-        { label: "Weight (SOAP)", value: soapTon.toFixed(3) },
-        { label: "G.Total Wt (Ton)", value: grandTotalTon.toFixed(3) },
-      ]);
-      y += STAT_BAR_H + TABLE_GAP;
-
-      doc.font("Helvetica-Bold").fontSize(5.5).fillColor("#0b2b5b").text("Provisional Order", x, y, { width, align: "center" });
-      doc.fillColor("#000");
-      y += STAT_HEADING_H;
-      drawStatBar(x, width, y, [
-        { label: "Weight (Ghee)", value: gheeTon.toFixed(3) },
-        { label: "Weight (Oil)", value: oilTon.toFixed(3) },
-        { label: "RSO", value: rsoTon.toFixed(3) },
-        { label: "Total", value: provisionalTotal.toFixed(3) },
-      ]);
+      if (kind === "bill") {
+        drawKV(x, y, width, "Weight (Ton)", grandTotalTon.toFixed(3), true);
+        y += KV_ROW_H;
+        drawKV(x, y, width, "Amount", Math.round(totalAmount).toLocaleString(), true);
+        y += KV_ROW_H + KV_GAP_H;
+        drawKV(x, y, width, "Weight (Ghee)", gheeTon.toFixed(3));
+        y += KV_ROW_H;
+        drawKV(x, y, width, "Weight (Oil)", oilTon.toFixed(3));
+        y += KV_ROW_H;
+        drawKV(x, y, width, "Total Weight (Ton)", totalTon.toFixed(3), true);
+        y += KV_ROW_H;
+        drawKV(x, y, width, "Weight (RSO)", rsoTon.toFixed(3));
+        y += KV_ROW_H;
+        drawKV(x, y, width, "Weight (SOAP)", soapTon.toFixed(3));
+        y += KV_ROW_H;
+        drawKV(x, y, width, "G.Total Weight (Ton)", grandTotalTon.toFixed(3), true);
+      } else {
+        drawKV(x, y, width, "Weight (Ghee)", gheeTon.toFixed(3));
+        y += KV_ROW_H;
+        drawKV(x, y, width, "Weight (Oil)", oilTon.toFixed(3));
+        y += KV_ROW_H;
+        drawKV(x, y, width, "RSO", rsoTon.toFixed(3));
+        y += KV_ROW_H;
+        drawKV(x, y, width, "Total", provisionalTotal.toFixed(3), true);
+      }
     }
 
     for (let i = 0; i < orders.length; i += ordersPerPage) {
       if (i > 0) doc.addPage();
       const pageOrders = orders.slice(i, i + ordersPerPage);
 
-      // Vertical dashed cut-line down the middle of the page.
-      doc.save();
-      doc.dash(3, { space: 2 }).strokeColor("#999").lineWidth(0.5);
-      doc.moveTo(pageLeft + quadrantWidth + colGap / 2, pageTop).lineTo(pageLeft + quadrantWidth + colGap / 2, pageTop + pageHeight).stroke();
-      doc.undash();
-      doc.restore();
-
       pageOrders.forEach((order, rowIdx) => {
-        const rowTop = pageTop + rowIdx * (slipHeight + rowGap);
+        const rowTop = pageTop + rowIdx * (rowHeight + rowGap);
         const discount = discountByTownId.get(order.town_id ?? "") ?? 0;
 
-        drawSlip(order, "bill", pageLeft, rowTop, quadrantWidth, discount);
-        drawSlip(order, "dispatch", pageLeft + quadrantWidth + colGap, rowTop, quadrantWidth, discount);
+        drawTable(order, "bill", pageLeft, rowTop, discount);
+        drawTable(order, "dispatch", pageLeft + billW + colGap, rowTop, discount);
 
-        // Horizontal dashed cut-line under this order-row (skip after
-        // the very last row on the page).
+        // Vertical dashed cut-line between this row's two tables.
+        doc.save();
+        doc.dash(3, { space: 2 }).strokeColor("#999").lineWidth(0.5);
+        const cutX = pageLeft + billW + colGap / 2;
+        doc.moveTo(cutX, rowTop).lineTo(cutX, rowTop + rowHeight).stroke();
+        doc.undash();
+        doc.restore();
+
+        // Horizontal dashed cut-line under this row (skip after the
+        // last row on the page).
         if (rowIdx < pageOrders.length - 1) {
-          const lineY = rowTop + slipHeight + rowGap / 2;
+          const lineY = rowTop + rowHeight + rowGap / 2;
           doc.save();
           doc.dash(3, { space: 2 }).strokeColor("#999").lineWidth(0.5);
-          doc.moveTo(pageLeft, lineY).lineTo(pageLeft + pageWidth, lineY).stroke();
+          doc.moveTo(pageLeft, lineY).lineTo(pageLeft + billW + colGap + dispatchW, lineY).stroke();
           doc.undash();
           doc.restore();
         }
