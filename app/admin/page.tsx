@@ -27,74 +27,48 @@ const SECTIONS = [
 
 export default function AdminIndexPage() {
   return (
-    <div style={{ minHeight: "100vh", background: "#fffdf5", fontFamily: "system-ui, sans-serif" }}>
-      <div
-        style={{
-          background: NAVY,
-          padding: "28px 24px",
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          borderBottom: `3px solid ${YELLOW}`,
-        }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo.jpg" alt="ASIA GHEE MILLS (Pvt.) Ltd." style={{ width: 48, height: 48, borderRadius: 10, objectFit: "cover", background: "#fff" }} />
-        <div>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: "#fff", margin: 0 }}>ASIA GHEE MILLS (Pvt.) Ltd.</h1>
-          <p style={{ fontSize: 12, color: "#c9d6ec", margin: "2px 0 0" }}>Admin Panel</p>
-        </div>
+    <main style={{ maxWidth: 900, margin: "0 auto", padding: 32, fontFamily: "system-ui, sans-serif" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+        <div style={{ width: 6, height: 22, background: YELLOW, borderRadius: 3 }} />
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: NAVY, margin: 0 }}>Dashboard</h2>
       </div>
 
-      <main style={{ maxWidth: 900, margin: "0 auto", padding: 32 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-          <div style={{ width: 6, height: 22, background: YELLOW, borderRadius: 3 }} />
-          <h2 style={{ fontSize: 18, fontWeight: 700, color: NAVY, margin: 0 }}>Dashboard</h2>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
-          {SECTIONS.map((s) => (
-            <Link
-              key={s.href}
-              href={s.href}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
+        {SECTIONS.map((s) => (
+          <Link
+            key={s.href}
+            href={s.href}
+            style={{
+              display: "block",
+              background: "#fff",
+              border: `1px solid ${YELLOW}`,
+              borderRadius: 12,
+              padding: 20,
+              textDecoration: "none",
+              boxShadow: "0 2px 8px rgba(11,43,91,0.06)",
+            }}
+          >
+            <div
               style={{
-                display: "block",
-                background: "#fff",
-                border: `1px solid ${YELLOW}`,
-                borderRadius: 12,
-                padding: 20,
-                textDecoration: "none",
-                boxShadow: "0 2px 8px rgba(11,43,91,0.06)",
+                width: 42,
+                height: 42,
+                borderRadius: 10,
+                background: "#eef3fb",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: NAVY,
+                marginBottom: 14,
               }}
             >
-              <div
-                style={{
-                  width: 42,
-                  height: 42,
-                  borderRadius: 10,
-                  background: "#eef3fb",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: NAVY,
-                  marginBottom: 14,
-                }}
-              >
-                {s.icon}
-              </div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 4 }}>{s.title}</div>
-              <div style={{ fontSize: 13, color: "#666", lineHeight: 1.4 }}>{s.description}</div>
-            </Link>
-          ))}
-        </div>
-
-        <div style={{ marginTop: 28 }}>
-          <Link href="/book" style={{ fontSize: 13, color: NAVY }}>
-            ← View public booking page
+              {s.icon}
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 4 }}>{s.title}</div>
+            <div style={{ fontSize: 13, color: "#666", lineHeight: 1.4 }}>{s.description}</div>
           </Link>
-        </div>
-      </main>
-    </div>
+        ))}
+      </div>
+    </main>
   );
 }
 
