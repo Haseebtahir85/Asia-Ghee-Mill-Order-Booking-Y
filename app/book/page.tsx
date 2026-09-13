@@ -14,6 +14,12 @@ const urduFont: React.CSSProperties = {
   fontFamily: "var(--font-jameel-noori), var(--font-noto-nastaliq), 'Noto Nastaliq Urdu', serif",
 };
 
+// True if the string contains Urdu/Arabic-script characters, so we only
+// apply the Urdu font to messages that are actually in Urdu.
+function isUrduText(text: string): boolean {
+  return /[\u0600-\u06FF]/.test(text);
+}
+
 function townLabel(t: Town): string {
   return t.name;
 }
@@ -95,6 +101,8 @@ export default function BookPage() {
   const [error, setError] = useState<string | null>(null);
   const [confirmedOrderNumbers, setConfirmedOrderNumbers] = useState<string[] | null>(null);
   const [showQtyModal, setShowQtyModal] = useState(false);
+  const [conflictModalNames, setConflictModalNames] = useState<string[] | null>(null);
+  const conflictSignatureRef = useRef<string>("");
 
   // Read-only Pakistan Standard Time clock (not derived from the device's local time zone)
   const [pkTime, setPkTime] = useState(getPakistanTimeString());
@@ -185,6 +193,18 @@ export default function BookPage() {
     }
     return conflicts;
   }, [rows]);
+
+  // Pop up the conflict warning the moment a new conflicting pair appears —
+  // but only once per distinct conflict, not on every further keystroke
+  // while the same conflict is still unresolved.
+  useEffect(() => {
+    const signature = Array.from(conflictItemIds).sort().join(",");
+    if (signature && signature !== conflictSignatureRef.current) {
+      const names = rows.filter((r) => conflictItemIds.has(r.item.id)).map((r) => r.item.name);
+      setConflictModalNames(names);
+    }
+    conflictSignatureRef.current = signature;
+  }, [conflictItemIds, rows]);
 
   function updateQty(itemId: string, value: string) {
     setQtys((prev) => ({ ...prev, [itemId]: value }));
@@ -357,7 +377,7 @@ export default function BookPage() {
             No items found in the catalog. Add items in the admin panel before orders can be booked.
           </div>
         ) : (
-          <div className={styles.tableOuter} style={{ position: "relative", zIndex: 1 }}>
+          <div className={styles.tableOuter} style={{ position: "relative", zIndex: 1, maxWidth: 480, margin: "0 auto" }}>
           <div className={styles.tableWrap}>
             <table className={styles.table} style={{ tableLayout: "fixed", width: "100%", borderCollapse: "collapse" }}>
               <colgroup>
@@ -367,9 +387,9 @@ export default function BookPage() {
               </colgroup>
               <thead>
                 <tr>
-                  <th style={{ textAlign: "left" }}>Item</th>
-                  <th className={styles.center} style={{ textAlign: "center" }}>Qty</th>
-                  <th className={styles.right} style={{ textAlign: "right" }}>Weight</th>
+                  <th style={{ textAlign: "left", padding: "6px 8px" }}>Item</th>
+                  <th className={styles.center} style={{ textAlign: "center", padding: "6px 8px" }}>Qty</th>
+                  <th className={styles.right} style={{ textAlign: "right", padding: "6px 8px" }}>Weight</th>
                 </tr>
               </thead>
               <tbody>
@@ -382,7 +402,7 @@ export default function BookPage() {
                       className={isGroupEnd ? styles.groupEnd : undefined}
                       style={{ animation: "fadeUp 0.35s ease both", animationDelay: `${Math.min(i * 0.02, 0.4)}s` }}
                     >
-                      <td style={{ textAlign: "left", verticalAlign: "middle" }}>
+                      <td style={{ textAlign: "left", verticalAlign: "middle", padding: "6px 8px" }}>
                         <div className={styles.itemCell}>
                           <span className={styles.itemIcon}>
                             <ProductIcon kind={kind} />
@@ -390,7 +410,7 @@ export default function BookPage() {
                           {item.name}
                         </div>
                       </td>
-                      <td className={styles.center} style={{ textAlign: "center", verticalAlign: "middle" }}>
+                      <td className={styles.center} style={{ textAlign: "center", verticalAlign: "middle", padding: "6px 8px" }}>
                         <input
                           type="number"
                           min={0}
@@ -401,20 +421,15 @@ export default function BookPage() {
                           style={{
                             boxSizing: "border-box",
                             width: "100%",
-                            maxWidth: 80,
+                            maxWidth: 70,
                             display: "block",
                             margin: "0 auto",
                             textAlign: "center",
                             borderColor: hasConflict ? "#d62828" : undefined,
                           }}
                         />
-                        {hasConflict && (
-                          <div style={{ ...urduFont, fontSize: 11, color: "#d62828", marginTop: 4, textAlign: "center" }}>
-                            صرف ایک پیک سائز منتخب کریں
-                          </div>
-                        )}
                       </td>
-                      <td className={styles.right} style={{ textAlign: "right", verticalAlign: "middle" }}>
+                      <td className={styles.right} style={{ textAlign: "right", verticalAlign: "middle", padding: "6px 8px" }}>
                         {weight ? weight.toFixed(2) : 0}
                       </td>
                     </tr>
@@ -423,8 +438,8 @@ export default function BookPage() {
               </tbody>
               <tfoot>
                 <tr className={styles.totalRow}>
-                  <td colSpan={2} style={{ textAlign: "left" }}>Total</td>
-                  <td className={styles.right} style={{ textAlign: "right" }}>{totals.weight.toFixed(2)} kg</td>
+                  <td colSpan={2} style={{ textAlign: "left", padding: "6px 8px" }}>Total</td>
+                  <td className={styles.right} style={{ textAlign: "right", padding: "6px 8px" }}>{totals.weight.toFixed(2)} kg</td>
                 </tr>
               </tfoot>
             </table>
@@ -465,7 +480,14 @@ export default function BookPage() {
           </div>
         )}
 
-        {error && <div className={styles.errorBanner}>{error}</div>}
+        {error && (
+          <div
+            className={styles.errorBanner}
+            style={isUrduText(error) ? { ...urduFont, textAlign: "right" } : undefined}
+          >
+            {error}
+          </div>
+        )}
 
         <button
           type="submit"
@@ -502,6 +524,27 @@ export default function BookPage() {
               style={{ marginTop: 16, background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: 13 }}
             >
               Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {conflictModalNames && (
+        <div style={modalOverlayStyle} onClick={() => setConflictModalNames(null)}>
+          <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
+            <p style={{ ...urduFont, fontSize: 15, color: "#d62828", margin: "0 0 12px", textAlign: "right", lineHeight: 1.7 }}>
+              صرف ایک پیک سائز منتخب کریں — ایک ہی وزن کے دو مختلف پیک ایک ساتھ نہیں لیے جا سکتے۔
+            </p>
+            <ul style={{ margin: "0 0 16px", paddingLeft: 18, fontSize: 13, color: "#444" }}>
+              {conflictModalNames.map((name) => (
+                <li key={name}>{name}</li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              onClick={() => setConflictModalNames(null)}
+              style={qtyOptionButtonStyle}
+            >
+              OK
             </button>
           </div>
         </div>
