@@ -53,7 +53,7 @@ function AdminLoginForm() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: `linear-gradient(180deg, ${NAVY} 0%, #133a75 45%, #eef2f7 45%, #eef2f7 100%)`,
+        background: `linear-gradient(180deg, ${NAVY} 0%, #133a75 45%, #fff7e0 45%, #fff7e0 100%)`,
         fontFamily: "system-ui, sans-serif",
         padding: 16,
       }}
