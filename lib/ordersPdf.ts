@@ -1,25 +1,24 @@
 // Destination: lib/ordersPdf.ts
 import PDFDocument from "pdfkit";
 
-// Builds the "Order Book" PDF matching your actual template exactly:
-// two SEPARATE, self-contained tables per order (a bill/customer table
-// and a "Provisional Order" dispatch table), each with its own
-// complete header, compact/natural column widths (not stretched to
-// fill the page), and its own DISTINCT summary section written as a
-// plain label/value list (not a horizontal stat bar) — the two tables
-// show different totals, not duplicates of each other:
+// Builds the "Order Book" PDF: two SEPARATE, self-contained tables per
+// order (a bill/customer table and a "Provisional Order" dispatch
+// table), each with its own complete header and its own DISTINCT
+// summary section written as a plain label/value list — the two
+// tables show different totals, not duplicates of each other:
 //
 //   Bill table summary: Weight (Ton), Amount, then the full six-line
 //     breakdown — Weight (Ghee), Weight (Oil), Total Weight (Ton),
 //     Weight (RSO), Weight (SOAP), G.Total Weight (Ton).
-//   Provisional Order table summary: a compact 2x2 grid — Weight
-//     (Ghee) / RSO on one row, Weight (Oil) / Total on the next
-//     (Total = Ghee + Oil + RSO).
+//   Provisional Order table summary: Weight (Ghee) / Weight (Oil) /
+//     RSO / Total (Total = Ghee + Oil + RSO).
 //
-// Every table lists the full catalog (blank rows for items not
-// ordered on this order), and dashed guide lines mark where the
-// printed sheet should be cut, since each table becomes a separate
-// physical slip.
+// FIXED at exactly 2 orders (4 tables) per A4 portrait page. Column
+// widths scale to fill the page width exactly, and every row/font size
+// scales UP from a compact base so the fixed 2-per-page budget is used
+// productively (bigger, more legible text) rather than left as blank
+// space. Dashed guide lines mark where the printed sheet should be
+// cut, since each table becomes a separate physical slip.
 function weightCategory(name: string, type: string): "ghee" | "oil" | "rso" | "soap" | "other" {
   const n = name.toLowerCase();
   if (n.includes("rso")) return "rso";
@@ -31,15 +30,28 @@ function weightCategory(name: string, type: string): "ghee" | "oil" | "rso" | "s
 
 type CatalogItem = { id: string; name: string; weight_kg: number; type: string };
 
-const ROW_H = 5.3;
-const HEADER_LINE_H = 7;
-const HEADER_LINES = 3; // company name / order# (+ "Provisional Order" for the right table) / town+date
-const PANEL_HEADER_H = 6;
-const KV_ROW_H = 6;
-const KV_GAP_H = 3;
+const ORDERS_PER_PAGE = 2;
 
-// Compact, fixed column widths — matching a normal spreadsheet's
-// natural width, not stretched to fill the page.
+// Compact base sizing (proportions only — actual values are scaled up
+// at render time to fill exactly half the page height each).
+const BASE_ROW_H = 5.3;
+const BASE_HEADER_LINE_H = 7;
+const HEADER_LINES = 3; // company name / order# (+ "Provisional Order" for the right table) / town+date
+const BASE_PANEL_HEADER_H = 6;
+const BASE_KV_ROW_H = 6;
+const BASE_KV_GAP_H = 3;
+const BASE_FONT = {
+  company: 7,
+  subtitle: 6, // "Provisional Order" / bill's "Order #:" line
+  dispatchOrderNo: 5.2,
+  townDate: 5,
+  colHeader: 5.2,
+  itemRow: 5,
+  kv: 5.3,
+};
+
+// Compact, fixed base column widths — proportions only; scaled up to
+// fill the actual page width at render time.
 const BILL_COLS = [
   { label: "Item", w: 78 },
   { label: "Qty", w: 22 },
@@ -71,15 +83,12 @@ export function buildOrderBookPdf(
     const pageHeight = doc.page.height - doc.page.margins.top - doc.page.margins.bottom;
     const pageLeft = doc.page.margins.left;
     const pageTop = doc.page.margins.top;
+    const rowGap = 20;
 
+    // --- Horizontal scale: fill the page width exactly ---
     const rawBillW = BILL_COLS.reduce((a, c) => a + c.w, 0);
     const rawDispatchW = DISPATCH_COLS.reduce((a, c) => a + c.w, 0);
     const colGap = 20;
-
-    // Scale both tables' columns proportionally so the row's total width
-    // exactly fills the page — no leftover strip of blank space on the
-    // right, but proportions stay identical to the compact base widths
-    // (not arbitrarily stretched).
     const widthScale = pageWidth / (rawBillW + rawDispatchW + colGap);
     const scaledBillCols = BILL_COLS.map((c) => ({ ...c, w: c.w * widthScale }));
     const scaledDispatchCols = DISPATCH_COLS.map((c) => ({ ...c, w: c.w * widthScale }));
@@ -87,57 +96,69 @@ export function buildOrderBookPdf(
     const dispatchW = scaledDispatchCols.reduce((a, c) => a + c.w, 0);
     const scaledColGap = colGap * widthScale;
 
-    // The bill table's summary is much taller (8 lines) than the
-    // Provisional Order table's (2 lines) — the row's total height is
-    // driven by the taller one; the shorter side just ends early.
-    const itemRowsH = catalogItems.length * ROW_H;
-    const headerH = HEADER_LINES * HEADER_LINE_H;
-    const billSummaryH = KV_ROW_H * 2 + KV_GAP_H + KV_ROW_H * 6; // Weight/Amount, gap, 6-line breakdown
-    const dispatchSummaryH = KV_ROW_H * 4; // Ghee / Oil / RSO / Total, one per line
-    const slipContentH = headerH + PANEL_HEADER_H + itemRowsH + 4;
-    const rowHeight = slipContentH + Math.max(billSummaryH, dispatchSummaryH) + 6;
-    const baseRowGap = 14;
-    const ordersPerPage = Math.max(1, Math.floor((pageHeight + baseRowGap) / (rowHeight + baseRowGap)));
+    // --- Vertical scale: exactly ORDERS_PER_PAGE rows fill the page
+    // height, so content grows to use the space instead of leaving it
+    // blank ---
+    const billSummaryLines = 8; // Weight/Amount + 6-line breakdown
+    const dispatchSummaryLines = 4;
+    const baseHeaderH = HEADER_LINES * BASE_HEADER_LINE_H;
+    const baseSlipContentH = baseHeaderH + BASE_PANEL_HEADER_H + catalogItems.length * BASE_ROW_H + 4;
+    const baseBillSummaryH = BASE_KV_ROW_H * 2 + BASE_KV_GAP_H + BASE_KV_ROW_H * 6;
+    const baseDispatchSummaryH = BASE_KV_ROW_H * dispatchSummaryLines;
+    const baseRowHeight = baseSlipContentH + Math.max(baseBillSummaryH, baseDispatchSummaryH) + 6;
 
-    // One label/value line — plain text, no bar, no merged cells.
+    const targetRowHeight = (pageHeight - (ORDERS_PER_PAGE - 1) * rowGap) / ORDERS_PER_PAGE;
+    const heightScale = targetRowHeight / baseRowHeight;
+
+    const ROW_H = BASE_ROW_H * heightScale;
+    const HEADER_LINE_H = BASE_HEADER_LINE_H * heightScale;
+    const PANEL_HEADER_H = BASE_PANEL_HEADER_H * heightScale;
+    const KV_ROW_H = BASE_KV_ROW_H * heightScale;
+    const KV_GAP_H = BASE_KV_GAP_H * heightScale;
+    const rowHeight = targetRowHeight;
+
+    const font = {
+      company: BASE_FONT.company * heightScale,
+      subtitle: BASE_FONT.subtitle * heightScale,
+      dispatchOrderNo: BASE_FONT.dispatchOrderNo * heightScale,
+      townDate: BASE_FONT.townDate * heightScale,
+      colHeader: BASE_FONT.colHeader * heightScale,
+      itemRow: BASE_FONT.itemRow * heightScale,
+      kv: BASE_FONT.kv * heightScale,
+    };
+
     function drawKV(x: number, y: number, width: number, label: string, value: string, bold = false) {
-      doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(5.3);
+      doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(font.kv);
       doc.text(label, x, y, { width: width * 0.62 });
-      doc.font("Helvetica-Bold").fontSize(5.3);
+      doc.font("Helvetica-Bold").fontSize(font.kv);
       doc.text(value, x + width * 0.62, y, { width: width * 0.38, align: "right" });
     }
 
-    function drawTable(
-      order: any,
-      kind: "bill" | "dispatch",
-      x: number,
-      top: number,
-      discount: number
-    ) {
+    function drawTable(order: any, kind: "bill" | "dispatch", x: number, top: number, discount: number) {
       let y = top;
       const cols = kind === "bill" ? scaledBillCols : scaledDispatchCols;
       const width = cols.reduce((a, c) => a + c.w, 0);
 
-      doc.font("Helvetica-Bold").fontSize(7).text("ASIA GHEE MILLS (Pvt.) Ltd.", x, y, { width, align: "center" });
+      doc.font("Helvetica-Bold").fontSize(font.company).text("ASIA GHEE MILLS (Pvt.) Ltd.", x, y, { width, align: "center" });
       y += HEADER_LINE_H;
       if (kind === "dispatch") {
-        doc.fontSize(6).fillColor("#c0392b").text("Provisional Order", x, y, { width, align: "center" });
+        doc.fontSize(font.subtitle).fillColor("#c0392b").text("Provisional Order", x, y, { width, align: "center" });
         doc.fillColor("#000");
       } else {
-        doc.fontSize(6).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
+        doc.fontSize(font.subtitle).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
         doc.fillColor("#000");
       }
       y += HEADER_LINE_H;
       if (kind === "dispatch") {
-        doc.font("Helvetica").fontSize(5.2).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
+        doc.font("Helvetica").fontSize(font.dispatchOrderNo).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
         doc.fillColor("#000");
       } else {
-        doc.font("Helvetica").fontSize(5).fillColor("#555").text(`Town: ${order.town ?? ""}    Date: ${order.order_date}`, x, y, { width, align: "center" });
+        doc.font("Helvetica").fontSize(font.townDate).fillColor("#555").text(`Town: ${order.town ?? ""}    Date: ${order.order_date}`, x, y, { width, align: "center" });
         doc.fillColor("#000");
       }
       y += HEADER_LINE_H;
       if (kind === "dispatch") {
-        doc.font("Helvetica").fontSize(5).fillColor("#555").text(`Town: ${order.town ?? ""}    Date: ${order.order_date}`, x, y, { width, align: "center" });
+        doc.font("Helvetica").fontSize(font.townDate).fillColor("#555").text(`Town: ${order.town ?? ""}    Date: ${order.order_date}`, x, y, { width, align: "center" });
         doc.fillColor("#000");
         y += HEADER_LINE_H;
       }
@@ -145,11 +166,11 @@ export function buildOrderBookPdf(
       const colX: number[] = [x];
       for (let i = 0; i < cols.length - 1; i++) colX.push(colX[i] + cols[i].w);
 
-      doc.font("Helvetica-Bold").fontSize(5.2);
+      doc.font("Helvetica-Bold").fontSize(font.colHeader);
       cols.forEach((c, i) => {
         doc.text(c.label, colX[i], y, { width: c.w, align: i === 0 ? "left" : "center" });
       });
-      y += 7;
+      y += HEADER_LINE_H;
       doc.moveTo(x, y).lineTo(x + width, y).strokeColor("#0b2b5b").lineWidth(0.75).stroke();
       y += 2;
 
@@ -162,7 +183,7 @@ export function buildOrderBookPdf(
       let rsoTon = 0;
       let soapTon = 0;
 
-      doc.font("Helvetica").fontSize(5);
+      doc.font("Helvetica").fontSize(font.itemRow);
       for (const item of catalogItems) {
         const line = lineByItemId.get(item.id) ?? lineByName.get(item.name.trim().toLowerCase());
         const qty = line ? line.qty : 0;
@@ -229,16 +250,9 @@ export function buildOrderBookPdf(
       }
     }
 
-    for (let i = 0; i < orders.length; i += ordersPerPage) {
+    for (let i = 0; i < orders.length; i += ORDERS_PER_PAGE) {
       if (i > 0) doc.addPage();
-      const pageOrders = orders.slice(i, i + ordersPerPage);
-      const n = pageOrders.length;
-
-      // Distribute any leftover vertical space evenly between rows on
-      // THIS page, instead of leaving it stranded as a blank strip at
-      // the bottom — a page with fewer orders (e.g. the last, partial
-      // page) spreads its rows out to still use the full page height.
-      const rowGap = n > 1 ? Math.max(baseRowGap, (pageHeight - n * rowHeight) / (n - 1)) : baseRowGap;
+      const pageOrders = orders.slice(i, i + ORDERS_PER_PAGE);
 
       pageOrders.forEach((order, rowIdx) => {
         const rowTop = pageTop + rowIdx * (rowHeight + rowGap);
