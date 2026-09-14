@@ -40,6 +40,7 @@ const HEADER_LINES = 3; // company name / order# (+ "Provisional Order" for the 
 const BASE_PANEL_HEADER_H = 6;
 const BASE_KV_ROW_H = 6;
 const BASE_KV_GAP_H = 3;
+const BASE_BOX_H = 16; // rounded pill box for the fraction-style totals
 const BASE_FONT = {
   company: 7,
   subtitle: 6, // "Provisional Order" / bill's "Order #:" line
@@ -48,6 +49,8 @@ const BASE_FONT = {
   colHeader: 5.2,
   itemRow: 5,
   kv: 5.3,
+  boxNumerator: 5.6,
+  boxDenominator: 4.4,
 };
 
 // Compact, fixed base column widths — proportions only; scaled up to
@@ -99,12 +102,10 @@ export function buildOrderBookPdf(
     // --- Vertical scale: exactly ORDERS_PER_PAGE rows fill the page
     // height, so content grows to use the space instead of leaving it
     // blank ---
-    const billSummaryLines = 8; // Weight/Amount + 6-line breakdown
-    const dispatchSummaryLines = 4;
     const baseHeaderH = HEADER_LINES * BASE_HEADER_LINE_H;
     const baseSlipContentH = baseHeaderH + BASE_PANEL_HEADER_H + catalogItems.length * BASE_ROW_H + 4;
-    const baseBillSummaryH = BASE_KV_ROW_H * 2 + BASE_KV_GAP_H + BASE_KV_ROW_H * 6;
-    const baseDispatchSummaryH = BASE_KV_ROW_H * dispatchSummaryLines;
+    const baseBillSummaryH = BASE_KV_ROW_H + BASE_KV_GAP_H + BASE_BOX_H; // Amount line + gap + totals box
+    const baseDispatchSummaryH = BASE_BOX_H; // totals box only, no Amount line
     const baseRowHeight = baseSlipContentH + Math.max(baseBillSummaryH, baseDispatchSummaryH) + 6;
 
     const targetRowHeight = (pageHeight - (ORDERS_PER_PAGE - 1) * rowGap) / ORDERS_PER_PAGE;
@@ -115,6 +116,7 @@ export function buildOrderBookPdf(
     const PANEL_HEADER_H = BASE_PANEL_HEADER_H * heightScale;
     const KV_ROW_H = BASE_KV_ROW_H * heightScale;
     const KV_GAP_H = BASE_KV_GAP_H * heightScale;
+    const BOX_H = BASE_BOX_H * heightScale;
     const rowHeight = targetRowHeight;
 
     const font = {
@@ -125,6 +127,8 @@ export function buildOrderBookPdf(
       colHeader: BASE_FONT.colHeader * heightScale,
       itemRow: BASE_FONT.itemRow * heightScale,
       kv: BASE_FONT.kv * heightScale,
+      boxNumerator: BASE_FONT.boxNumerator * heightScale,
+      boxDenominator: BASE_FONT.boxDenominator * heightScale,
     };
 
     function drawKV(x: number, y: number, width: number, label: string, value: string, bold = false) {
@@ -151,6 +155,39 @@ export function buildOrderBookPdf(
       doc.font("Helvetica").fontSize(font.townDate).fillColor("#555");
       doc.text(dateText, startX + townWidth, y, { lineBreak: false });
       doc.fillColor("#000");
+    }
+
+    // The rounded-pill totals box — each segment is a fraction: the
+    // category name + value on top (bold italic), a short rule, then
+    // "Weight ton" underneath (italic) — separated by vertical divider
+    // lines, matching the reference design exactly.
+    function drawTotalsBox(x: number, y: number, width: number, segments: { label: string; value: string }[]) {
+      const segW = width / segments.length;
+      const radius = BOX_H / 2.2;
+
+      doc.roundedRect(x, y, width, BOX_H, radius).strokeColor("#000").lineWidth(0.75).stroke();
+
+      segments.forEach((s, i) => {
+        const segX = x + i * segW;
+        const cx = segX + segW / 2;
+
+        if (i > 0) {
+          doc.moveTo(segX, y + 3).lineTo(segX, y + BOX_H - 3).strokeColor("#000").lineWidth(0.6).stroke();
+        }
+
+        const numerator = `${s.label} ${s.value}`;
+        doc.font("Helvetica-BoldOblique").fontSize(font.boxNumerator);
+        const numW = doc.widthOfString(numerator);
+        const ruleY = y + BOX_H * 0.48;
+        doc.text(numerator, cx - numW / 2, y + BOX_H * 0.14, { lineBreak: false });
+
+        const ruleW = Math.min(segW - 10, Math.max(numW, doc.widthOfString("Weight ton")) + 4);
+        doc.moveTo(cx - ruleW / 2, ruleY).lineTo(cx + ruleW / 2, ruleY).strokeColor("#000").lineWidth(0.5).stroke();
+
+        doc.font("Helvetica-Oblique").fontSize(font.boxDenominator);
+        const denomW = doc.widthOfString("Weight ton");
+        doc.text("Weight ton", cx - denomW / 2, y + BOX_H * 0.58, { lineBreak: false });
+      });
     }
 
     function drawTable(order: any, kind: "bill" | "dispatch", x: number, top: number, discount: number) {
@@ -258,29 +295,22 @@ export function buildOrderBookPdf(
       const provisionalTotal = gheeTon + oilTon + rsoTon;
 
       if (kind === "bill") {
-        drawKV(x, y, width, "Weight (Ton)", grandTotalTon.toFixed(3), true);
-        y += KV_ROW_H;
         drawKV(x, y, width, "Amount", Math.round(totalAmount).toLocaleString(), true);
         y += KV_ROW_H + KV_GAP_H;
-        drawKV(x, y, width, "Weight (Ghee)", gheeTon.toFixed(3));
-        y += KV_ROW_H;
-        drawKV(x, y, width, "Weight (Oil)", oilTon.toFixed(3));
-        y += KV_ROW_H;
-        drawKV(x, y, width, "Total Weight (Ton)", totalTon.toFixed(3), true);
-        y += KV_ROW_H;
-        drawKV(x, y, width, "Weight (RSO)", rsoTon.toFixed(3));
-        y += KV_ROW_H;
-        drawKV(x, y, width, "Weight (SOAP)", soapTon.toFixed(3));
-        y += KV_ROW_H;
-        drawKV(x, y, width, "G.Total Weight (Ton)", grandTotalTon.toFixed(3), true);
+        drawTotalsBox(x, y, width, [
+          { label: "Ghee", value: gheeTon.toFixed(3) },
+          { label: "Oil", value: oilTon.toFixed(3) },
+          { label: "RSO", value: rsoTon.toFixed(3) },
+          { label: "Soap", value: soapTon.toFixed(3) },
+          { label: "Total", value: grandTotalTon.toFixed(3) },
+        ]);
       } else {
-        drawKV(x, y, width, "Weight (Ghee)", gheeTon.toFixed(3));
-        y += KV_ROW_H;
-        drawKV(x, y, width, "Weight (Oil)", oilTon.toFixed(3));
-        y += KV_ROW_H;
-        drawKV(x, y, width, "RSO", rsoTon.toFixed(3));
-        y += KV_ROW_H;
-        drawKV(x, y, width, "Total", provisionalTotal.toFixed(3), true);
+        drawTotalsBox(x, y, width, [
+          { label: "Ghee", value: gheeTon.toFixed(3) },
+          { label: "Oil", value: oilTon.toFixed(3) },
+          { label: "RSO", value: rsoTon.toFixed(3) },
+          { label: "Total", value: provisionalTotal.toFixed(3) },
+        ]);
       }
     }
 
