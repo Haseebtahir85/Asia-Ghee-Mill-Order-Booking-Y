@@ -2,9 +2,13 @@
 import ExcelJS from "exceljs";
 
 // Builds the "Soft copy" workbook — ONE sheet total, not one per order.
-// Every order's block (an "Order ID" header, then its Item No. / Item /
-// UoM Code / Quantity rows) is stacked one after another down the same
-// sheet, separated by a blank row. UoM Code is always "Nos".
+// Every order's block (Order ID / Town / Date header, then its Item
+// No. / Item / UoM Code / Quantity rows) is stacked one after another
+// down the same sheet, with generous spacing between blocks and a hard
+// page break forced after each order — so an order's rows can never
+// get split across a printed page boundary (half on one page, half on
+// the next); each one always starts fresh at the top of a page.
+// UoM Code is always "Nos".
 export function buildSoftCopyWorkbook(orders: any[], itemNumberById: Map<string, string | null>): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "ASIA GHEE MILLS (Pvt.) Ltd.";
@@ -13,19 +17,22 @@ export function buildSoftCopyWorkbook(orders: any[], itemNumberById: Map<string,
   const sheet = workbook.addWorksheet("Soft Copy");
   sheet.columns = [{ width: 12 }, { width: 30 }, { width: 14 }, { width: 12 }];
 
+  const BLANK_ROWS_BETWEEN_ORDERS = 4;
+
   let row = 1;
   for (const order of orders) {
-    sheet.mergeCells(row, 1, row, 2);
-    const idCellA = sheet.getCell(row, 1);
-    idCellA.value = `Order ID: ${order.order_number}`;
-    idCellA.font = { bold: true, size: 11 };
-    idCellA.alignment = { horizontal: "center" };
+    sheet.mergeCells(row, 1, row, 4);
+    const idCell = sheet.getCell(row, 1);
+    idCell.value = `Order ID: ${order.order_number}`;
+    idCell.font = { bold: true, size: 12 };
+    idCell.alignment = { horizontal: "center" };
+    row++;
 
-    sheet.mergeCells(row, 3, row, 4);
-    const idCellB = sheet.getCell(row, 3);
-    idCellB.value = `Order ID: ${order.order_number}`;
-    idCellB.font = { bold: true, size: 11 };
-    idCellB.alignment = { horizontal: "center" };
+    sheet.mergeCells(row, 1, row, 4);
+    const townDateCell = sheet.getCell(row, 1);
+    townDateCell.value = `Town: ${order.town ?? ""}    Date: ${order.order_date}`;
+    townDateCell.font = { size: 10, italic: true };
+    townDateCell.alignment = { horizontal: "center" };
     row++;
 
     ["Item No.", "Item", "UoM Code", "Quantity"].forEach((h, i) => {
@@ -43,7 +50,11 @@ export function buildSoftCopyWorkbook(orders: any[], itemNumberById: Map<string,
       row++;
     }
 
-    row++; // blank separator row between orders
+    // Force a page break right after this order's last row — the next
+    // order always starts on a fresh page, never split mid-block.
+    sheet.getRow(row - 1).addPageBreak();
+
+    for (let i = 0; i < BLANK_ROWS_BETWEEN_ORDERS; i++) row++;
   }
 
   return workbook;
