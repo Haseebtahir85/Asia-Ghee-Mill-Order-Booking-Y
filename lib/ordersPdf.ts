@@ -134,6 +134,25 @@ export function buildOrderBookPdf(
       doc.text(value, x + width * 0.62, y, { width: width * 0.38, align: "right" });
     }
 
+    // Town is bold and 2pt larger than the rest of the line; Date stays
+    // normal weight/size. Both drawn as one manually-centered block so
+    // they still read as a single line.
+    function drawTownDateLine(x: number, y: number, width: number, town: string, date: string) {
+      const townText = `Town: ${town}`;
+      const dateText = `    Date: ${date}`;
+      doc.font("Helvetica-Bold").fontSize(font.townDate + 2);
+      const townWidth = doc.widthOfString(townText);
+      doc.font("Helvetica").fontSize(font.townDate);
+      const dateWidth = doc.widthOfString(dateText);
+      const startX = x + (width - (townWidth + dateWidth)) / 2;
+
+      doc.font("Helvetica-Bold").fontSize(font.townDate + 2).fillColor("#555");
+      doc.text(townText, startX, y, { lineBreak: false });
+      doc.font("Helvetica").fontSize(font.townDate).fillColor("#555");
+      doc.text(dateText, startX + townWidth, y, { lineBreak: false });
+      doc.fillColor("#000");
+    }
+
     function drawTable(order: any, kind: "bill" | "dispatch", x: number, top: number, discount: number) {
       let y = top;
       const cols = kind === "bill" ? scaledBillCols : scaledDispatchCols;
@@ -153,13 +172,11 @@ export function buildOrderBookPdf(
         doc.font("Helvetica").fontSize(font.dispatchOrderNo).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
         doc.fillColor("#000");
       } else {
-        doc.font("Helvetica").fontSize(font.townDate).fillColor("#555").text(`Town: ${order.town ?? ""}    Date: ${order.order_date}`, x, y, { width, align: "center" });
-        doc.fillColor("#000");
+        drawTownDateLine(x, y, width, order.town ?? "", order.order_date);
       }
       y += HEADER_LINE_H;
       if (kind === "dispatch") {
-        doc.font("Helvetica").fontSize(font.townDate).fillColor("#555").text(`Town: ${order.town ?? ""}    Date: ${order.order_date}`, x, y, { width, align: "center" });
-        doc.fillColor("#000");
+        drawTownDateLine(x, y, width, order.town ?? "", order.order_date);
         y += HEADER_LINE_H;
       }
 
@@ -182,6 +199,8 @@ export function buildOrderBookPdf(
       let oilTon = 0;
       let rsoTon = 0;
       let soapTon = 0;
+
+      const itemsTop = y;
 
       doc.font("Helvetica").fontSize(font.itemRow);
       for (const item of catalogItems) {
@@ -217,6 +236,21 @@ export function buildOrderBookPdf(
 
         y += ROW_H;
       }
+
+      // Grid lines — every row and every column boundary, like a real
+      // table, not just plain text.
+      const itemsBottom = y;
+      doc.save();
+      doc.strokeColor("#ccc").lineWidth(0.3);
+      for (let r = 0; r <= catalogItems.length; r++) {
+        const ly = itemsTop + r * ROW_H;
+        doc.moveTo(x, ly).lineTo(x + width, ly).stroke();
+      }
+      const vLines = [...colX, x + width];
+      for (const vx of vLines) {
+        doc.moveTo(vx, itemsTop).lineTo(vx, itemsBottom).stroke();
+      }
+      doc.restore();
 
       y += 3;
       const totalTon = gheeTon + oilTon;
