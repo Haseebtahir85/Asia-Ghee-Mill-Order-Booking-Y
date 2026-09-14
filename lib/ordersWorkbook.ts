@@ -62,7 +62,7 @@ export function buildSoftCopyWorkbook(orders: any[], itemNumberById: Map<string,
     const townDateCell = sheet.getCell(row, 1);
     townDateCell.value = {
       richText: [
-        { font: { bold: true, size: 10 }, text: `Town: ${order.town ?? ""}` },
+        { font: { bold: true, size: 12 }, text: `Town: ${order.town ?? ""}` },
         { font: { italic: true, size: 10 }, text: `    Date: ${order.order_date}` },
       ],
     };
