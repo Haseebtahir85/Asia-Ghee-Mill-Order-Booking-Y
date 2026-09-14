@@ -157,10 +157,9 @@ export function buildOrderBookPdf(
       doc.fillColor("#000");
     }
 
-    // The rounded-pill totals box — each segment is a fraction: the
-    // category name + value on top (bold italic), a short rule, then
-    // "Weight ton" underneath (italic) — separated by vertical divider
-    // lines, matching the reference design exactly.
+    // The rounded-pill totals box — each segment: category name on top
+    // (bold italic), a short rule, then the actual value below with a
+    // small (but readable) "ton" unit suffix — no "Weight ton" label.
     function drawTotalsBox(x: number, y: number, width: number, segments: { label: string; value: string }[]) {
       const segW = width / segments.length;
       const radius = BOX_H / 2.2;
@@ -175,18 +174,27 @@ export function buildOrderBookPdf(
           doc.moveTo(segX, y + 3).lineTo(segX, y + BOX_H - 3).strokeColor("#000").lineWidth(0.6).stroke();
         }
 
-        const numerator = `${s.label} ${s.value}`;
         doc.font("Helvetica-BoldOblique").fontSize(font.boxNumerator);
-        const numW = doc.widthOfString(numerator);
-        const ruleY = y + BOX_H * 0.48;
-        doc.text(numerator, cx - numW / 2, y + BOX_H * 0.14, { lineBreak: false });
+        const labelW = doc.widthOfString(s.label);
+        doc.text(s.label, cx - labelW / 2, y + BOX_H * 0.14, { lineBreak: false });
 
-        const ruleW = Math.min(segW - 10, Math.max(numW, doc.widthOfString("Weight ton")) + 4);
+        const valueText = s.value;
+        const tonText = " ton";
+        doc.font("Helvetica-Bold").fontSize(font.boxDenominator + 1);
+        const valueW = doc.widthOfString(valueText);
+        doc.font("Helvetica").fontSize(font.boxDenominator - 1);
+        const tonW = doc.widthOfString(tonText);
+        const denomW = valueW + tonW;
+
+        const ruleY = y + BOX_H * 0.48;
+        const ruleW = Math.min(segW - 10, Math.max(labelW, denomW) + 4);
         doc.moveTo(cx - ruleW / 2, ruleY).lineTo(cx + ruleW / 2, ruleY).strokeColor("#000").lineWidth(0.5).stroke();
 
-        doc.font("Helvetica-Oblique").fontSize(font.boxDenominator);
-        const denomW = doc.widthOfString("Weight ton");
-        doc.text("Weight ton", cx - denomW / 2, y + BOX_H * 0.58, { lineBreak: false });
+        const denomStartX = cx - denomW / 2;
+        doc.font("Helvetica-Bold").fontSize(font.boxDenominator + 1);
+        doc.text(valueText, denomStartX, y + BOX_H * 0.58, { lineBreak: false });
+        doc.font("Helvetica").fontSize(font.boxDenominator - 1);
+        doc.text(tonText, denomStartX + valueW, y + BOX_H * 0.6, { lineBreak: false });
       });
     }
 
