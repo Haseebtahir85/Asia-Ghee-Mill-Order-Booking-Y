@@ -31,12 +31,12 @@ function weightCategory(name: string, type: string): "ghee" | "oil" | "rso" | "s
 
 type CatalogItem = { id: string; name: string; weight_kg: number; type: string };
 
-const ROW_H = 5.6;
-const HEADER_LINE_H = 8;
+const ROW_H = 5.3;
+const HEADER_LINE_H = 7;
 const HEADER_LINES = 3; // company name / order# (+ "Provisional Order" for the right table) / town+date
-const PANEL_HEADER_H = 7;
-const KV_ROW_H = 6.5;
-const KV_GAP_H = 4;
+const PANEL_HEADER_H = 6;
+const KV_ROW_H = 6;
+const KV_GAP_H = 3;
 
 // Compact, fixed column widths — matching a normal spreadsheet's
 // natural width, not stretched to fill the page.
@@ -61,7 +61,7 @@ export function buildOrderBookPdf(
   discountByTownId: Map<string, number>
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 20 });
+    const doc = new PDFDocument({ size: "A4", layout: "portrait", margin: 20 });
     const chunks: Buffer[] = [];
     doc.on("data", (c) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -72,9 +72,20 @@ export function buildOrderBookPdf(
     const pageLeft = doc.page.margins.left;
     const pageTop = doc.page.margins.top;
 
-    const billW = BILL_COLS.reduce((a, c) => a + c.w, 0);
-    const dispatchW = DISPATCH_COLS.reduce((a, c) => a + c.w, 0);
+    const rawBillW = BILL_COLS.reduce((a, c) => a + c.w, 0);
+    const rawDispatchW = DISPATCH_COLS.reduce((a, c) => a + c.w, 0);
     const colGap = 20;
+
+    // Scale both tables' columns proportionally so the row's total width
+    // exactly fills the page — no leftover strip of blank space on the
+    // right, but proportions stay identical to the compact base widths
+    // (not arbitrarily stretched).
+    const widthScale = pageWidth / (rawBillW + rawDispatchW + colGap);
+    const scaledBillCols = BILL_COLS.map((c) => ({ ...c, w: c.w * widthScale }));
+    const scaledDispatchCols = DISPATCH_COLS.map((c) => ({ ...c, w: c.w * widthScale }));
+    const billW = scaledBillCols.reduce((a, c) => a + c.w, 0);
+    const dispatchW = scaledDispatchCols.reduce((a, c) => a + c.w, 0);
+    const scaledColGap = colGap * widthScale;
 
     // The bill table's summary is much taller (8 lines) than the
     // Provisional Order table's (2 lines) — the row's total height is
@@ -85,14 +96,14 @@ export function buildOrderBookPdf(
     const dispatchSummaryH = KV_ROW_H * 4; // Ghee / Oil / RSO / Total, one per line
     const slipContentH = headerH + PANEL_HEADER_H + itemRowsH + 4;
     const rowHeight = slipContentH + Math.max(billSummaryH, dispatchSummaryH) + 6;
-    const rowGap = 14;
-    const ordersPerPage = Math.max(1, Math.floor((pageHeight + rowGap) / (rowHeight + rowGap)));
+    const baseRowGap = 14;
+    const ordersPerPage = Math.max(1, Math.floor((pageHeight + baseRowGap) / (rowHeight + baseRowGap)));
 
     // One label/value line — plain text, no bar, no merged cells.
     function drawKV(x: number, y: number, width: number, label: string, value: string, bold = false) {
-      doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(5.6);
+      doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(5.3);
       doc.text(label, x, y, { width: width * 0.62 });
-      doc.font("Helvetica-Bold").fontSize(5.6);
+      doc.font("Helvetica-Bold").fontSize(5.3);
       doc.text(value, x + width * 0.62, y, { width: width * 0.38, align: "right" });
     }
 
@@ -104,29 +115,29 @@ export function buildOrderBookPdf(
       discount: number
     ) {
       let y = top;
-      const cols = kind === "bill" ? BILL_COLS : DISPATCH_COLS;
+      const cols = kind === "bill" ? scaledBillCols : scaledDispatchCols;
       const width = cols.reduce((a, c) => a + c.w, 0);
 
-      doc.font("Helvetica-Bold").fontSize(7.5).text("ASIA GHEE MILLS (Pvt.) Ltd.", x, y, { width, align: "center" });
+      doc.font("Helvetica-Bold").fontSize(7).text("ASIA GHEE MILLS (Pvt.) Ltd.", x, y, { width, align: "center" });
       y += HEADER_LINE_H;
       if (kind === "dispatch") {
-        doc.fontSize(6.5).fillColor("#c0392b").text("Provisional Order", x, y, { width, align: "center" });
+        doc.fontSize(6).fillColor("#c0392b").text("Provisional Order", x, y, { width, align: "center" });
         doc.fillColor("#000");
       } else {
-        doc.fontSize(6.5).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
+        doc.fontSize(6).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
         doc.fillColor("#000");
       }
       y += HEADER_LINE_H;
       if (kind === "dispatch") {
-        doc.font("Helvetica").fontSize(5.5).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
+        doc.font("Helvetica").fontSize(5.2).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
         doc.fillColor("#000");
       } else {
-        doc.font("Helvetica").fontSize(5.2).fillColor("#555").text(`Town: ${order.town ?? ""}    Date: ${order.order_date}`, x, y, { width, align: "center" });
+        doc.font("Helvetica").fontSize(5).fillColor("#555").text(`Town: ${order.town ?? ""}    Date: ${order.order_date}`, x, y, { width, align: "center" });
         doc.fillColor("#000");
       }
       y += HEADER_LINE_H;
       if (kind === "dispatch") {
-        doc.font("Helvetica").fontSize(5.2).fillColor("#555").text(`Town: ${order.town ?? ""}    Date: ${order.order_date}`, x, y, { width, align: "center" });
+        doc.font("Helvetica").fontSize(5).fillColor("#555").text(`Town: ${order.town ?? ""}    Date: ${order.order_date}`, x, y, { width, align: "center" });
         doc.fillColor("#000");
         y += HEADER_LINE_H;
       }
@@ -134,7 +145,7 @@ export function buildOrderBookPdf(
       const colX: number[] = [x];
       for (let i = 0; i < cols.length - 1; i++) colX.push(colX[i] + cols[i].w);
 
-      doc.font("Helvetica-Bold").fontSize(5.5);
+      doc.font("Helvetica-Bold").fontSize(5.2);
       cols.forEach((c, i) => {
         doc.text(c.label, colX[i], y, { width: c.w, align: i === 0 ? "left" : "center" });
       });
@@ -151,7 +162,7 @@ export function buildOrderBookPdf(
       let rsoTon = 0;
       let soapTon = 0;
 
-      doc.font("Helvetica").fontSize(5.2);
+      doc.font("Helvetica").fontSize(5);
       for (const item of catalogItems) {
         const line = lineByItemId.get(item.id) ?? lineByName.get(item.name.trim().toLowerCase());
         const qty = line ? line.qty : 0;
@@ -221,18 +232,25 @@ export function buildOrderBookPdf(
     for (let i = 0; i < orders.length; i += ordersPerPage) {
       if (i > 0) doc.addPage();
       const pageOrders = orders.slice(i, i + ordersPerPage);
+      const n = pageOrders.length;
+
+      // Distribute any leftover vertical space evenly between rows on
+      // THIS page, instead of leaving it stranded as a blank strip at
+      // the bottom — a page with fewer orders (e.g. the last, partial
+      // page) spreads its rows out to still use the full page height.
+      const rowGap = n > 1 ? Math.max(baseRowGap, (pageHeight - n * rowHeight) / (n - 1)) : baseRowGap;
 
       pageOrders.forEach((order, rowIdx) => {
         const rowTop = pageTop + rowIdx * (rowHeight + rowGap);
         const discount = discountByTownId.get(order.town_id ?? "") ?? 0;
 
         drawTable(order, "bill", pageLeft, rowTop, discount);
-        drawTable(order, "dispatch", pageLeft + billW + colGap, rowTop, discount);
+        drawTable(order, "dispatch", pageLeft + billW + scaledColGap, rowTop, discount);
 
         // Vertical dashed cut-line between this row's two tables.
         doc.save();
         doc.dash(3, { space: 2 }).strokeColor("#999").lineWidth(0.5);
-        const cutX = pageLeft + billW + colGap / 2;
+        const cutX = pageLeft + billW + scaledColGap / 2;
         doc.moveTo(cutX, rowTop).lineTo(cutX, rowTop + rowHeight).stroke();
         doc.undash();
         doc.restore();
@@ -243,7 +261,7 @@ export function buildOrderBookPdf(
           const lineY = rowTop + rowHeight + rowGap / 2;
           doc.save();
           doc.dash(3, { space: 2 }).strokeColor("#999").lineWidth(0.5);
-          doc.moveTo(pageLeft, lineY).lineTo(pageLeft + billW + colGap + dispatchW, lineY).stroke();
+          doc.moveTo(pageLeft, lineY).lineTo(pageLeft + billW + scaledColGap + dispatchW, lineY).stroke();
           doc.undash();
           doc.restore();
         }
