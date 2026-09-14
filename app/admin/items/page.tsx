@@ -532,7 +532,13 @@ export default function AdminItemsPage() {
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
-          <button type="button" onClick={downloadTemplate} style={secondaryButtonStyle}>
+          <button
+            type="button"
+            onClick={downloadTemplate}
+            disabled={loading || items.length === 0}
+            title={loading ? "Waiting for items to load…" : items.length === 0 ? "No items to export yet" : undefined}
+            style={{ ...secondaryButtonStyle, opacity: loading || items.length === 0 ? 0.6 : 1, cursor: loading || items.length === 0 ? "default" : "pointer" }}
+          >
             Download Excel Template
           </button>
           <button type="button" onClick={triggerExcelUpload} disabled={importing} style={{ ...buttonStyle, opacity: importing ? 0.7 : 1 }}>
