@@ -409,9 +409,15 @@ export default function BookPage() {
         </div>
 
         {loading ? (
-          <div className={styles.stateCard}>
-            <div className={styles.spinner} />
-            Loading catalog...
+          <div className={styles.stateCard} style={{ padding: 0, overflow: "hidden", border: "none", background: "transparent" }}>
+            <video
+              src="/video/loading.mp4"
+              autoPlay
+              muted
+              loop
+              playsInline
+              style={{ width: "100%", maxWidth: 360, display: "block", margin: "0 auto" }}
+            />
           </div>
         ) : loadError ? (
           <div className={`${styles.stateCard} ${styles.errorState}`}>
@@ -544,6 +550,23 @@ export default function BookPage() {
           {submitting ? "بک ہو رہا ہے..." : "ابھی بک کریں"}
         </button>
       </form>
+
+      <div style={{ textAlign: "center", marginTop: 20, padding: "14px 0", fontSize: 12, color: "#888", lineHeight: 1.7 }}>
+        <div>All Rights Reserved</div>
+        <div style={{ fontWeight: 600, color: "#555" }}>SH Automation</div>
+        <div>
+          Mail:{" "}
+          <a href="mailto:Haseebchaudhary8558@gmail.com" style={{ color: "#888" }}>
+            Haseebchaudhary8558@gmail.com
+          </a>
+        </div>
+        <div>
+          Contact:{" "}
+          <a href="tel:+923049657700" style={{ color: "#888" }}>
+            +92 304 9657700
+          </a>
+        </div>
+      </div>
 
       {showQtyModal && (
         <div style={modalOverlayStyle} onClick={() => setShowQtyModal(false)}>
