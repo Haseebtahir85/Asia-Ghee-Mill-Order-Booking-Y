@@ -43,7 +43,7 @@ export default function AdminIndexPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/admin/dashboard-stats")
+    fetch("/api/admin/dashboard-stats", { cache: "no-store" })
       .then((res) => res.json())
       .then((json) => {
         if (json.error) setError(json.error);

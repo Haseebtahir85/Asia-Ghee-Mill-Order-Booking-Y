@@ -2,6 +2,14 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase";
 
+// Without this, Next.js's App Router treats a plain GET handler with no
+// cookies/headers/searchParams as static and caches the response
+// indefinitely (until redeploy) — which is exactly why the numbers here
+// were stuck and not updating on refresh. Forcing dynamic rendering
+// makes it re-query the database on every request.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 // GET /api/admin/dashboard-stats — total orders, orders since the last
 // "New Order" export button press (same marker that button reads/
 // advances), and a town-wise breakdown of both counts.
