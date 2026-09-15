@@ -96,7 +96,9 @@ export function buildSoftCopyWorkbook(orders: any[], itemNumberById: Map<string,
 
 // Shared fetch of the lookups both builders need alongside the orders
 // themselves — catalog rows (for item_number/weight lookups) and
-// per-town discounts.
+// per-town info (discount, plus UPC/Group No for the bill header).
+export type TownInfo = { discount: number; upc: string | null; group_no: number | null };
+
 export async function fetchWorkbookLookups(supabaseServer: any, orders: any[]) {
   const { data: catalogItems, error: itemsError } = await supabaseServer
     .from("items")
@@ -106,10 +108,16 @@ export async function fetchWorkbookLookups(supabaseServer: any, orders: any[]) {
   if (itemsError) throw new Error(itemsError.message);
 
   const townIds = Array.from(new Set(orders.map((o) => o.town_id).filter(Boolean)));
-  const { data: towns } = await supabaseServer.from("towns").select("id, discount").in("id", townIds as string[]);
-  const discountByTownId = new Map<string, number>(
-    ((towns ?? []) as any[]).map((t: any) => [t.id, t.discount ?? 0] as [string, number])
+  const { data: towns } = await supabaseServer
+    .from("towns")
+    .select("id, discount, upc, group_no")
+    .in("id", townIds as string[]);
+
+  const townInfoByTownId = new Map<string, TownInfo>(
+    ((towns ?? []) as any[]).map(
+      (t: any) => [t.id, { discount: t.discount ?? 0, upc: t.upc ?? null, group_no: t.group_no ?? null }] as [string, TownInfo]
+    )
   );
 
-  return { catalogItems: catalogItems ?? [], discountByTownId };
+  return { catalogItems: catalogItems ?? [], townInfoByTownId };
 }

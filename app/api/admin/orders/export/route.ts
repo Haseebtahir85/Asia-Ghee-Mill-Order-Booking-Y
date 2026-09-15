@@ -29,12 +29,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No matching orders found" }, { status: 404 });
     }
 
-    const { catalogItems, discountByTownId } = await fetchWorkbookLookups(supabaseServer, orders);
+    const { catalogItems, townInfoByTownId } = await fetchWorkbookLookups(supabaseServer, orders);
     const itemNumberById = new Map<string, string | null>(
       catalogItems.map((it: any) => [it.id, it.item_number ?? null] as [string, string | null])
     );
 
-    const pdfBuffer = await buildOrderBookPdf(orders, catalogItems, discountByTownId);
+    const pdfBuffer = await buildOrderBookPdf(orders, catalogItems, townInfoByTownId);
     const workbook = buildSoftCopyWorkbook(orders, itemNumberById);
     const xlsxBuffer = await workbook.xlsx.writeBuffer();
 

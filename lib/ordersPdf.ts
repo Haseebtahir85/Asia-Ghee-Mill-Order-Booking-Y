@@ -36,7 +36,7 @@ const ORDERS_PER_PAGE = 2;
 // at render time to fill exactly half the page height each).
 const BASE_ROW_H = 5.3;
 const BASE_HEADER_LINE_H = 7;
-const HEADER_LINES = 3; // company name / order# (+ "Provisional Order" for the right table) / town+date
+const HEADER_LINES = 4; // company name / order# (or "Provisional Order") / town+date (+ order# for dispatch) / group no+upc (bill only, or town+date again for dispatch)
 const BASE_PANEL_HEADER_H = 6;
 const BASE_KV_ROW_H = 6;
 const BASE_KV_GAP_H = 3;
@@ -70,10 +70,12 @@ const DISPATCH_COLS = [
   { label: "Dispatched", w: 40 },
 ];
 
+type TownInfo = { discount: number; upc: string | null; group_no: number | null };
+
 export function buildOrderBookPdf(
   orders: any[],
   catalogItems: CatalogItem[],
-  discountByTownId: Map<string, number>
+  townInfoByTownId: Map<string, TownInfo>
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: "A4", layout: "portrait", margin: 20 });
@@ -223,6 +225,13 @@ export function buildOrderBookPdf(
       if (kind === "dispatch") {
         drawTownDateLine(x, y, width, order.town ?? "", order.order_date);
         y += HEADER_LINE_H;
+      } else {
+        const info = townInfoByTownId.get(order.town_id ?? "");
+        const groupNo = info?.group_no != null ? String(info.group_no) : "-";
+        const upc = info?.upc || "-";
+        doc.font("Helvetica").fontSize(font.townDate).fillColor("#555").text(`Group No: ${groupNo}    UPC: ${upc}`, x, y, { width, align: "center" });
+        doc.fillColor("#000");
+        y += HEADER_LINE_H;
       }
 
       const colX: number[] = [x];
@@ -328,7 +337,7 @@ export function buildOrderBookPdf(
 
       pageOrders.forEach((order, rowIdx) => {
         const rowTop = pageTop + rowIdx * (rowHeight + rowGap);
-        const discount = discountByTownId.get(order.town_id ?? "") ?? 0;
+        const discount = townInfoByTownId.get(order.town_id ?? "")?.discount ?? 0;
 
         drawTable(order, "bill", pageLeft, rowTop, discount);
         drawTable(order, "dispatch", pageLeft + billW + scaledColGap, rowTop, discount);
