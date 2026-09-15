@@ -545,27 +545,29 @@ export default function BookPage() {
         </button>
       </form>
 
-      <div style={{ textAlign: "center", marginTop: 20, padding: "14px 0", fontSize: 12, color: "#888", lineHeight: 1.7 }}>
-        <div>All Rights Reserved</div>
-        <div style={{ fontWeight: 600, color: "#555" }}>SH Automation</div>
-        <div>
-          Mail:{" "}
-          <a href="mailto:Haseebchaudhary8558@gmail.com" style={{ color: "#888" }}>
-            Haseebchaudhary8558@gmail.com
-          </a>
-        </div>
-        <div>
-          Contact:{" "}
-          <a href="tel:+923049657700" style={{ color: "#888" }}>
-            +92 304 9657700
-          </a>
-        </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 20, padding: "14px 0", fontSize: 12, color: "#888", lineHeight: 1.7 }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/sh-automate-logo.png"
           alt="SH Automate"
-          style={{ width: 120, height: "auto", margin: "10px auto 0", display: "block", opacity: 0.85 }}
+          style={{ width: 70, height: "auto", flexShrink: 0, opacity: 0.85 }}
         />
+        <div style={{ textAlign: "left" }}>
+          <div>All Rights Reserved</div>
+          <div style={{ fontWeight: 600, color: "#555" }}>SH Automation</div>
+          <div>
+            Mail:{" "}
+            <a href="mailto:Haseebchaudhary8558@gmail.com" style={{ color: "#888" }}>
+              Haseebchaudhary8558@gmail.com
+            </a>
+          </div>
+          <div>
+            Contact:{" "}
+            <a href="tel:+923049657700" style={{ color: "#888" }}>
+              +92 304 9657700
+            </a>
+          </div>
+        </div>
       </div>
 
       {showQtyModal && (
