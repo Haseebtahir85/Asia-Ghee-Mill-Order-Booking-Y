@@ -517,6 +517,11 @@ export default function BookPage() {
               <span>G.Total Weight (Ton)</span>
               <strong>{totals.grandTotalTon.toFixed(3)}</strong>
             </div>
+
+            <div style={summaryAmountBarStyle}>
+              <span>Total Amount in Pkr</span>
+              <strong>Rs {Math.round(totals.amount).toLocaleString()}</strong>
+            </div>
           </div>
           </div>
         )}
@@ -814,4 +819,16 @@ const summaryGrandTotalBarStyle: React.CSSProperties = {
   background: "#fff4e0",
   borderRadius: 6,
   padding: "7px 8px",
+};
+
+const summaryAmountBarStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  fontSize: 14,
+  fontWeight: 700,
+  color: "#0b5394",
+  background: "#e8f2fc",
+  borderRadius: 6,
+  padding: "7px 8px",
+  marginTop: 8,
 };
