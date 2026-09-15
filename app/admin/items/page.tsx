@@ -598,12 +598,12 @@ export default function AdminItemsPage() {
         <p>Loading...</p>
       ) : (
         <div style={{ overflowX: "auto", border: `1px solid ${YELLOW}`, borderRadius: 10, background: "#fff" }}>
-        <table style={{ width: "100%", minWidth: 720, borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", minWidth: 770, borderCollapse: "collapse" }}>
           <colgroup>
             <col style={{ width: 46 }} />
             <col style={{ width: 40 }} />
             <col style={{ minWidth: 200 }} />
-            <col style={{ width: 90 }} />
+            <col style={{ width: 140 }} />
             <col style={{ width: 90 }} />
             <col style={{ width: 100 }} />
             <col style={{ width: 100 }} />
