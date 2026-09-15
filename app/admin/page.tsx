@@ -1,8 +1,12 @@
 // Destination: app/admin/page.tsx
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 const NAVY = "#0b2b5b";
 const YELLOW = "#F6C90E";
+const RED = "#D62828";
 
 const SECTIONS = [
   {
@@ -25,13 +29,96 @@ const SECTIONS = [
   },
 ];
 
+type TownStat = { town: string; total: number; new: number };
+type DashboardStats = {
+  totalOrders: number;
+  newOrdersCount: number;
+  lastExportAt: string | null;
+  byTown: TownStat[];
+};
+
 export default function AdminIndexPage() {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/admin/dashboard-stats")
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.error) setError(json.error);
+        else setStats(json);
+      })
+      .catch(() => setError("Failed to load stats"))
+      .finally(() => setLoading(false));
+  }, []);
+
   return (
     <main style={{ maxWidth: 900, margin: "0 auto", padding: 32, fontFamily: "system-ui, sans-serif" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
         <div style={{ width: 6, height: 22, background: YELLOW, borderRadius: 3 }} />
         <h2 style={{ fontSize: 18, fontWeight: 700, color: NAVY, margin: 0 }}>Dashboard</h2>
       </div>
+
+      {error && (
+        <div style={{ color: RED, background: "#fdecec", border: "1px solid #f6c9c9", borderRadius: 6, padding: "6px 10px", marginBottom: 16, fontSize: 13 }}>
+          {error}
+        </div>
+      )}
+
+      {!loading && stats && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16, marginBottom: 24 }}>
+            <div style={statCardStyle}>
+              <div style={statLabelStyle}>Total Orders</div>
+              <div style={{ ...statValueStyle, color: NAVY }}>{stats.totalOrders}</div>
+            </div>
+            <div style={{ ...statCardStyle, background: "#fff8e6", borderColor: YELLOW }}>
+              <div style={statLabelStyle}>New Orders</div>
+              <div style={{ ...statValueStyle, color: "#8a6608" }}>{stats.newOrdersCount}</div>
+              <div style={{ fontSize: 11, color: "#999", marginTop: 4 }}>
+                {stats.lastExportAt ? `Since last "New Order" export` : "Since the beginning (no export yet)"}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+            <div style={{ width: 6, height: 18, background: YELLOW, borderRadius: 3 }} />
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: NAVY, margin: 0 }}>Orders by Town</h3>
+          </div>
+
+          <div style={{ overflowX: "auto", border: `1px solid ${YELLOW}`, borderRadius: 10, background: "#fff", marginBottom: 32 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ textAlign: "left", background: NAVY }}>
+                  <th style={thStyle}>Town</th>
+                  <th style={{ ...thStyle, textAlign: "right" }}>Total Orders</th>
+                  <th style={{ ...thStyle, textAlign: "right" }}>New Orders</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.byTown.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} style={{ ...tdStyle, textAlign: "center", color: "#888", padding: 20 }}>
+                      No orders yet.
+                    </td>
+                  </tr>
+                ) : (
+                  stats.byTown.map((t) => (
+                    <tr key={t.town} style={{ borderBottom: "1px solid #f3e6b0" }}>
+                      <td style={tdStyle}>{t.town}</td>
+                      <td style={{ ...tdStyle, textAlign: "right" }}>{t.total}</td>
+                      <td style={{ ...tdStyle, textAlign: "right", fontWeight: t.new > 0 ? 700 : 400, color: t.new > 0 ? "#8a6608" : "#888" }}>
+                        {t.new}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
         {SECTIONS.map((s) => (
@@ -71,6 +158,30 @@ export default function AdminIndexPage() {
     </main>
   );
 }
+
+const statCardStyle: React.CSSProperties = {
+  background: "#fff",
+  border: `1px solid #e6e9ef`,
+  borderRadius: 12,
+  padding: "16px 18px",
+};
+
+const statLabelStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: "#888",
+  textTransform: "uppercase",
+  letterSpacing: 0.3,
+};
+
+const statValueStyle: React.CSSProperties = {
+  fontSize: 28,
+  fontWeight: 700,
+  marginTop: 4,
+};
+
+const thStyle: React.CSSProperties = { padding: "9px 10px", fontSize: 13, color: "#fff", fontWeight: 700 };
+const tdStyle: React.CSSProperties = { padding: "8px 10px", fontSize: 13 };
 
 function ClipboardIcon() {
   return (
