@@ -409,15 +409,9 @@ export default function BookPage() {
         </div>
 
         {loading ? (
-          <div className={styles.stateCard} style={{ padding: 0, overflow: "hidden", border: "none", background: "transparent" }}>
-            <video
-              src="/video/loading.mp4"
-              autoPlay
-              muted
-              loop
-              playsInline
-              style={{ width: "100%", maxWidth: 360, display: "block", margin: "0 auto" }}
-            />
+          <div className={styles.stateCard}>
+            <div className={styles.spinner} />
+            Loading catalog...
           </div>
         ) : loadError ? (
           <div className={`${styles.stateCard} ${styles.errorState}`}>
@@ -566,6 +560,12 @@ export default function BookPage() {
             +92 304 9657700
           </a>
         </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/sh-automate-logo.png"
+          alt="SH Automate"
+          style={{ width: 120, height: "auto", margin: "10px auto 0", display: "block", opacity: 0.85 }}
+        />
       </div>
 
       {showQtyModal && (
