@@ -598,12 +598,12 @@ export default function AdminItemsPage() {
         <p>Loading...</p>
       ) : (
         <div style={{ overflowX: "auto", border: `1px solid ${YELLOW}`, borderRadius: 10, background: "#fff" }}>
-        <table style={{ width: "100%", minWidth: 770, borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", minWidth: 800, borderCollapse: "collapse" }}>
           <colgroup>
             <col style={{ width: 46 }} />
             <col style={{ width: 40 }} />
             <col style={{ minWidth: 200 }} />
-            <col style={{ width: 140 }} />
+            <col style={{ width: 170 }} />
             <col style={{ width: 90 }} />
             <col style={{ width: 100 }} />
             <col style={{ width: 100 }} />
@@ -648,7 +648,7 @@ export default function AdminItemsPage() {
                   <input
                     defaultValue={item.item_number ?? ""}
                     onBlur={(e) => e.target.value !== (item.item_number ?? "") && updateItem(item.id, { item_number: e.target.value || null })}
-                    style={{ width: "100%", border: "1px solid transparent", padding: 4, boxSizing: "border-box", borderRadius: 4 }}
+                    style={{ width: "100%", minWidth: 150, border: "1px solid transparent", padding: 4, boxSizing: "border-box", borderRadius: 4 }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = YELLOW)}
                     onBlurCapture={(e) => (e.currentTarget.style.borderColor = "transparent")}
                   />
