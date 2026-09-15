@@ -20,6 +20,26 @@ const STATUS_STYLES: Record<OrderStatus, { color: string; background: string }> 
   done: { color: "#1b8a3d", background: "#e6f4ea" },
 };
 
+// order_date is a plain date (no time); created_at is the full
+// timestamp — this formats that in Pakistan time, matching the clock
+// convention used elsewhere in the app.
+function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  const datePart = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Karachi",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(d);
+  const timePart = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Karachi",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  }).format(d);
+  return `${datePart}, ${timePart}`;
+}
+
 function formatDateLabel(iso: string): string {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
@@ -343,7 +363,7 @@ export default function AdminOrdersPage() {
             <tr style={{ textAlign: "left", background: NAVY }}>
               <th style={thStyle}><input type="checkbox" checked={selected.size === filteredOrders.length && filteredOrders.length > 0} onChange={toggleSelectAll} /></th>
               <th style={thStyle}>Order #</th>
-              <th style={thStyle}>Date</th>
+              <th style={thStyle}>Date &amp; Time</th>
               <th style={thStyle}>Town</th>
               <th style={thStyle}>Amount</th>
               <th style={thStyle}>Weight (Ton)</th>
@@ -358,7 +378,7 @@ export default function AdminOrdersPage() {
                 <tr key={o.id} style={{ borderBottom: "1px solid #f3e6b0" }}>
                   <td style={tdStyle}><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleSelect(o.id)} /></td>
                   <td style={{ ...tdStyle, fontWeight: 600, color: NAVY }}>{o.order_number}</td>
-                  <td style={tdStyle}>{o.order_date}</td>
+                  <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{formatDateTime(o.created_at)}</td>
                   <td style={tdStyle}>{o.town ?? ""}</td>
                   <td style={tdStyle}>{o.total_amount.toLocaleString()}</td>
                   <td style={tdStyle}>{(o.total_weight_kg / 1000).toFixed(3)}</td>
