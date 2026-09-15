@@ -436,6 +436,7 @@ export default function AdminTownsPage() {
         <table style={{ width: "100%", minWidth: 640, borderCollapse: "collapse" }}>
           <colgroup>
             <col style={{ width: 46 }} />
+            <col style={{ width: 40 }} />
             <col style={{ minWidth: 160 }} />
             <col style={{ width: 90 }} />
             <col style={{ width: 90 }} />
@@ -446,6 +447,7 @@ export default function AdminTownsPage() {
           <thead>
             <tr style={{ textAlign: "left", background: NAVY }}>
               <th style={thStyle}></th>
+              <th style={thStyle}>Sr#</th>
               <th style={thStyle}>Name</th>
               <th style={thStyle}>Group No</th>
               <th style={thStyle}>Code</th>
@@ -461,6 +463,7 @@ export default function AdminTownsPage() {
                   <button onClick={() => move(index, -1)} style={moveButtonStyle} title="Move up">↑</button>
                   <button onClick={() => move(index, 1)} style={moveButtonStyle} title="Move down">↓</button>
                 </td>
+                <td style={{ ...tdStyle, textAlign: "center", color: "#888" }}>{index + 1}</td>
                 <td style={tdStyle}>
                   <input
                     defaultValue={town.name}

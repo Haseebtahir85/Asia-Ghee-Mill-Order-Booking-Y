@@ -601,6 +601,7 @@ export default function AdminItemsPage() {
         <table style={{ width: "100%", minWidth: 720, borderCollapse: "collapse" }}>
           <colgroup>
             <col style={{ width: 46 }} />
+            <col style={{ width: 40 }} />
             <col style={{ minWidth: 200 }} />
             <col style={{ width: 90 }} />
             <col style={{ width: 90 }} />
@@ -614,6 +615,7 @@ export default function AdminItemsPage() {
           <thead>
             <tr style={{ textAlign: "left", background: NAVY }}>
               <th style={thStyle}></th>
+              <th style={thStyle}>Sr#</th>
               <th style={thStyle}>Item</th>
               <th style={thStyle}>Item #</th>
               <th style={thStyle}>SKU</th>
@@ -632,6 +634,7 @@ export default function AdminItemsPage() {
                   <button onClick={() => move(index, -1)} style={moveButtonStyle} title="Move up">↑</button>
                   <button onClick={() => move(index, 1)} style={moveButtonStyle} title="Move down">↓</button>
                 </td>
+                <td style={{ ...tdStyle, textAlign: "center", color: "#888" }}>{index + 1}</td>
                 <td style={tdStyle}>
                   <input
                     defaultValue={item.name}
