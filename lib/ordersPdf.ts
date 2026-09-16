@@ -1,24 +1,6 @@
 // Destination: lib/ordersPdf.ts
 import PDFDocument from "pdfkit";
 
-// Builds the "Order Book" PDF: two SEPARATE, self-contained tables per
-// order (a bill/customer table and a "Provisional Order" dispatch
-// table), each with its own complete header and its own DISTINCT
-// summary section written as a plain label/value list — the two
-// tables show different totals, not duplicates of each other:
-//
-//   Bill table summary: Weight (Ton), Amount, then the full six-line
-//     breakdown — Weight (Ghee), Weight (Oil), Total Weight (Ton),
-//     Weight (RSO), Weight (SOAP), G.Total Weight (Ton).
-//   Provisional Order table summary: Weight (Ghee) / Weight (Oil) /
-//     RSO / Total (Total = Ghee + Oil + RSO).
-//
-// FIXED at exactly 2 orders (4 tables) per A4 portrait page. Column
-// widths scale to fill the page width exactly, and every row/font size
-// scales UP from a compact base so the fixed 2-per-page budget is used
-// productively (bigger, more legible text) rather than left as blank
-// space. Dashed guide lines mark where the printed sheet should be
-// cut, since each table becomes a separate physical slip.
 function weightCategory(name: string, type: string): "ghee" | "oil" | "rso" | "soap" | "other" {
   const n = name.toLowerCase();
   if (n.includes("rso")) return "rso";
@@ -101,9 +83,18 @@ export function buildOrderBookPdf(
     const dispatchW = scaledDispatchCols.reduce((a, c) => a + c.w, 0);
     const scaledColGap = colGap * widthScale;
 
+    // Horizontal breathing room inside each cell so text never touches
+    // the vertical grid lines on either side of it. Scales with the
+    // same widthScale as the columns so it stays proportional.
+    const CELL_PAD_X = 3 * widthScale;
+
     // --- Vertical scale: exactly ORDERS_PER_PAGE rows fill the page
     // height, so content grows to use the space instead of leaving it
-    // blank ---
+    // blank. This is a PROPORTIONAL MODEL used to pick font/row sizes —
+    // the actual page positions used later come from a real measurement
+    // pass (see below drawTable's definition), so small inaccuracies
+    // here only affect how "full" the page looks, not whether the
+    // header/footer margins end up equal. ---
     const baseHeaderH = HEADER_LINES * BASE_HEADER_LINE_H;
     const baseSlipContentH = baseHeaderH + BASE_PANEL_HEADER_H + catalogItems.length * BASE_ROW_H + 4;
     const baseBillSummaryH = BASE_KV_ROW_H + BASE_KV_GAP_H + BASE_BOX_H; // Amount line + gap + totals box
@@ -119,7 +110,6 @@ export function buildOrderBookPdf(
     const KV_ROW_H = BASE_KV_ROW_H * heightScale;
     const KV_GAP_H = BASE_KV_GAP_H * heightScale;
     const BOX_H = BASE_BOX_H * heightScale;
-    const rowHeight = targetRowHeight;
 
     const font = {
       company: BASE_FONT.company * heightScale,
@@ -200,49 +190,83 @@ export function buildOrderBookPdf(
       });
     }
 
-    function drawTable(order: any, kind: "bill" | "dispatch", x: number, top: number, discount: number) {
+    // Draws one table (bill or dispatch) and returns the y-coordinate
+    // of its bottom edge (top + total content height).
+    //
+    // `draw` defaults to true for the real render pass. Passed as
+    // false, every actual ink operation (doc.text/stroke/roundedRect
+    // and the drawKV/drawTownDateLine/drawTotalsBox calls) is skipped,
+    // but every y += step still runs — so calling this once with
+    // draw=false against a dummy order measures exactly how tall a row
+    // will really be, using the exact same layout code that draws it,
+    // with zero risk of the measurement and the drawing disagreeing.
+    function drawTable(order: any, kind: "bill" | "dispatch", x: number, top: number, discount: number, draw: boolean = true): number {
       let y = top;
       const cols = kind === "bill" ? scaledBillCols : scaledDispatchCols;
       const width = cols.reduce((a, c) => a + c.w, 0);
 
-      doc.font("Helvetica-Bold").fontSize(font.company).text("ASIA GHEE MILLS (Pvt.) Ltd.", x, y, { width, align: "center" });
-      y += HEADER_LINE_H;
-      if (kind === "dispatch") {
-        doc.fontSize(font.subtitle).fillColor("#c0392b").text("Provisional Order", x, y, { width, align: "center" });
-        doc.fillColor("#000");
-      } else {
-        doc.fontSize(font.subtitle).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
-        doc.fillColor("#000");
+      if (draw) {
+        doc.font("Helvetica-Bold").fontSize(font.company).text("ASIA GHEE MILLS (Pvt.) Ltd.", x, y, { width, align: "center" });
       }
       y += HEADER_LINE_H;
-      if (kind === "dispatch") {
-        doc.font("Helvetica").fontSize(font.dispatchOrderNo).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
-        doc.fillColor("#000");
-      } else {
-        drawTownDateLine(x, y, width, order.town ?? "", order.order_date);
+
+      if (draw) {
+        if (kind === "dispatch") {
+          doc.fontSize(font.subtitle).fillColor("#c0392b").text("Provisional Order", x, y, { width, align: "center" });
+          doc.fillColor("#000");
+        } else {
+          doc.fontSize(font.subtitle).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
+          doc.fillColor("#000");
+        }
       }
       y += HEADER_LINE_H;
+
+      if (draw) {
+        if (kind === "dispatch") {
+          doc.font("Helvetica").fontSize(font.dispatchOrderNo).fillColor("#0b2b5b").text(`Order #: ${order.order_number}`, x, y, { width, align: "center" });
+          doc.fillColor("#000");
+        } else {
+          drawTownDateLine(x, y, width, order.town ?? "", order.order_date);
+        }
+      }
+      y += HEADER_LINE_H;
+
       if (kind === "dispatch") {
-        drawTownDateLine(x, y, width, order.town ?? "", order.order_date);
+        if (draw) drawTownDateLine(x, y, width, order.town ?? "", order.order_date);
         y += HEADER_LINE_H;
       } else {
-        const info = townInfoByTownId.get(order.town_id ?? "");
-        const groupNo = info?.group_no != null ? String(info.group_no) : "-";
-        const upc = info?.upc || "-";
-        doc.font("Helvetica").fontSize(font.townDate).fillColor("#555").text(`Group No: ${groupNo}    UPC: ${upc}`, x, y, { width, align: "center" });
-        doc.fillColor("#000");
+        if (draw) {
+          const info = townInfoByTownId.get(order.town_id ?? "");
+          const groupNo = info?.group_no != null ? String(info.group_no) : "-";
+          const upc = info?.upc || "-";
+          doc.font("Helvetica").fontSize(font.townDate).fillColor("#555").text(`Group No: ${groupNo}    UPC: ${upc}`, x, y, { width, align: "center" });
+          doc.fillColor("#000");
+        }
         y += HEADER_LINE_H;
       }
 
       const colX: number[] = [x];
       for (let i = 0; i < cols.length - 1; i++) colX.push(colX[i] + cols[i].w);
 
-      doc.font("Helvetica-Bold").fontSize(font.colHeader);
-      cols.forEach((c, i) => {
-        doc.text(c.label, colX[i], y, { width: c.w, align: i === 0 ? "left" : "center" });
-      });
-      y += HEADER_LINE_H;
-      doc.moveTo(x, y).lineTo(x + width, y).strokeColor("#0b2b5b").lineWidth(0.75).stroke();
+      if (draw) {
+        doc.font("Helvetica-Bold").fontSize(font.colHeader);
+        cols.forEach((c, i) => {
+          doc.text(c.label, colX[i] + CELL_PAD_X, y, { width: c.w - CELL_PAD_X * 2, align: i === 0 ? "left" : "center" });
+        });
+      }
+      // The column-header row uses the (smaller) panel-header height
+      // budget — matching how baseSlipContentH accounts for it above.
+      // This previously reused HEADER_LINE_H here instead, which quietly
+      // ate more vertical space per row than the sizing model assumed,
+      // pushing the second slip on the page past the bottom margin (the
+      // root cause of the uneven header/footer space, and — since a
+      // printer's own hardware margin then clips whatever falls past
+      // the page's usable area — of the missing grid lines on print).
+      y += PANEL_HEADER_H;
+
+      if (draw) {
+        doc.moveTo(x, y).lineTo(x + width, y).strokeColor("#0b2b5b").lineWidth(0.75).stroke();
+      }
       y += 2;
 
       const lineByItemId = new Map<string, any>((order.order_items as any[]).map((l: any) => [l.item_id, l] as [string, any]));
@@ -256,7 +280,11 @@ export function buildOrderBookPdf(
 
       const itemsTop = y;
 
-      doc.font("Helvetica").fontSize(font.itemRow);
+      if (draw) doc.font("Helvetica").fontSize(font.itemRow);
+      // Vertically center each item row's text within its ROW_H-tall
+      // cell instead of drawing it flush against the row's top border.
+      const itemTextYOffset = draw ? Math.max((ROW_H - doc.currentLineHeight(true)) / 2, 0) : 0;
+
       for (const item of catalogItems) {
         const line = lineByItemId.get(item.id) ?? lineByName.get(item.name.trim().toLowerCase());
         const qty = line ? line.qty : 0;
@@ -274,37 +302,46 @@ export function buildOrderBookPdf(
           else if (category === "soap") soapTon += weightTon;
         }
 
-        if (kind === "bill") {
-          doc.text(item.name, colX[0], y, { width: cols[0].w });
-          doc.text(qty ? String(qty) : "", colX[1], y, { width: cols[1].w, align: "center" });
-          doc.text(qty ? String(rate) : "", colX[2], y, { width: cols[2].w, align: "center" });
-          doc.text(qty ? Math.round(amount).toLocaleString() : "", colX[3], y, { width: cols[3].w, align: "center" });
-          doc.text(item.type, colX[4], y, { width: cols[4].w, align: "center" });
-          doc.text(qty ? weightTon.toFixed(3) : "", colX[5], y, { width: cols[5].w, align: "center" });
-        } else {
-          doc.text(item.name, colX[0], y, { width: cols[0].w });
-          doc.text(item.type, colX[1], y, { width: cols[1].w, align: "center" });
-          doc.text(qty ? String(qty) : "", colX[2], y, { width: cols[2].w, align: "center" });
-          // Dispatched intentionally left blank for manual check-off.
+        if (draw) {
+          const ty = y + itemTextYOffset;
+          if (kind === "bill") {
+            doc.text(item.name, colX[0] + CELL_PAD_X, ty, { width: cols[0].w - CELL_PAD_X * 2 });
+            doc.text(qty ? String(qty) : "", colX[1] + CELL_PAD_X, ty, { width: cols[1].w - CELL_PAD_X * 2, align: "center" });
+            doc.text(qty ? String(rate) : "", colX[2] + CELL_PAD_X, ty, { width: cols[2].w - CELL_PAD_X * 2, align: "center" });
+            doc.text(qty ? Math.round(amount).toLocaleString() : "", colX[3] + CELL_PAD_X, ty, { width: cols[3].w - CELL_PAD_X * 2, align: "center" });
+            doc.text(item.type, colX[4] + CELL_PAD_X, ty, { width: cols[4].w - CELL_PAD_X * 2, align: "center" });
+            doc.text(qty ? weightTon.toFixed(3) : "", colX[5] + CELL_PAD_X, ty, { width: cols[5].w - CELL_PAD_X * 2, align: "center" });
+          } else {
+            doc.text(item.name, colX[0] + CELL_PAD_X, ty, { width: cols[0].w - CELL_PAD_X * 2 });
+            doc.text(item.type, colX[1] + CELL_PAD_X, ty, { width: cols[1].w - CELL_PAD_X * 2, align: "center" });
+            doc.text(qty ? String(qty) : "", colX[2] + CELL_PAD_X, ty, { width: cols[2].w - CELL_PAD_X * 2, align: "center" });
+            // Dispatched intentionally left blank for manual check-off.
+          }
         }
 
         y += ROW_H;
       }
 
-      // Grid lines — every row and every column boundary, like a real
-      // table, not just plain text.
       const itemsBottom = y;
-      doc.save();
-      doc.strokeColor("#ccc").lineWidth(0.3);
-      for (let r = 0; r <= catalogItems.length; r++) {
-        const ly = itemsTop + r * ROW_H;
-        doc.moveTo(x, ly).lineTo(x + width, ly).stroke();
+
+      if (draw) {
+        // Grid lines — every row and every column boundary, like a
+        // real table, not just plain text. 0.5pt and a mid grey (not a
+        // near-white hairline) so they reliably survive printing —
+        // very thin/light strokes can drop out on some printers even
+        // though they render fine on screen or in a PDF viewer.
+        doc.save();
+        doc.strokeColor("#999999").lineWidth(0.5);
+        for (let r = 0; r <= catalogItems.length; r++) {
+          const ly = itemsTop + r * ROW_H;
+          doc.moveTo(x, ly).lineTo(x + width, ly).stroke();
+        }
+        const vLines = [...colX, x + width];
+        for (const vx of vLines) {
+          doc.moveTo(vx, itemsTop).lineTo(vx, itemsBottom).stroke();
+        }
+        doc.restore();
       }
-      const vLines = [...colX, x + width];
-      for (const vx of vLines) {
-        doc.moveTo(vx, itemsTop).lineTo(vx, itemsBottom).stroke();
-      }
-      doc.restore();
 
       y += 3;
       const totalTon = gheeTon + oilTon;
@@ -312,31 +349,57 @@ export function buildOrderBookPdf(
       const provisionalTotal = gheeTon + oilTon + rsoTon;
 
       if (kind === "bill") {
-        drawKV(x, y, width, "Amount", Math.round(totalAmount).toLocaleString(), true);
+        if (draw) drawKV(x, y, width, "Amount", Math.round(totalAmount).toLocaleString(), true);
         y += KV_ROW_H + KV_GAP_H;
-        drawTotalsBox(x, y, width, [
-          { label: "Ghee", value: gheeTon.toFixed(3) },
-          { label: "Oil", value: oilTon.toFixed(3) },
-          { label: "RSO", value: rsoTon.toFixed(3) },
-          { label: "Soap", value: soapTon.toFixed(3) },
-          { label: "Total", value: grandTotalTon.toFixed(3) },
-        ]);
+        if (draw) {
+          drawTotalsBox(x, y, width, [
+            { label: "Ghee", value: gheeTon.toFixed(3) },
+            { label: "Oil", value: oilTon.toFixed(3) },
+            { label: "RSO", value: rsoTon.toFixed(3) },
+            { label: "Soap", value: soapTon.toFixed(3) },
+            { label: "Total", value: grandTotalTon.toFixed(3) },
+          ]);
+        }
       } else {
-        drawTotalsBox(x, y, width, [
-          { label: "Ghee", value: gheeTon.toFixed(3) },
-          { label: "Oil", value: oilTon.toFixed(3) },
-          { label: "RSO", value: rsoTon.toFixed(3) },
-          { label: "Total", value: provisionalTotal.toFixed(3) },
-        ]);
+        if (draw) {
+          drawTotalsBox(x, y, width, [
+            { label: "Ghee", value: gheeTon.toFixed(3) },
+            { label: "Oil", value: oilTon.toFixed(3) },
+            { label: "RSO", value: rsoTon.toFixed(3) },
+            { label: "Total", value: provisionalTotal.toFixed(3) },
+          ]);
+        }
       }
+
+      // Bottom edge of this table's drawn content.
+      return y + BOX_H;
     }
+
+    // --- Measurement pass: find out how tall a row of content REALLY
+    // is (using the exact same layout code above, with draw=false so
+    // nothing is actually painted), then center the two rows on the
+    // page so the blank space above the first row equals the blank
+    // space below the second row. This replaces the earlier assumption
+    // that the proportional model above always fills the page exactly
+    // — now it's true by measurement, not by hoping the approximation
+    // is accurate. ---
+    const measureOrder = { order_number: "", order_date: "", town: "", town_id: null, order_items: [] };
+    const measuredBillH = drawTable(measureOrder, "bill", pageLeft, 0, 0, false);
+    const measuredDispatchH = drawTable(measureOrder, "dispatch", pageLeft, 0, 0, false);
+    const rowContentHeight = Math.max(measuredBillH, measuredDispatchH);
+
+    const totalContentHeight = ORDERS_PER_PAGE * rowContentHeight + (ORDERS_PER_PAGE - 1) * rowGap;
+    // Clamped at 0: if content ever measures taller than the page (it
+    // shouldn't, given the scaling above), fall back to flush-top
+    // rather than a negative offset.
+    const verticalOffset = Math.max((pageHeight - totalContentHeight) / 2, 0);
 
     for (let i = 0; i < orders.length; i += ORDERS_PER_PAGE) {
       if (i > 0) doc.addPage();
       const pageOrders = orders.slice(i, i + ORDERS_PER_PAGE);
 
       pageOrders.forEach((order, rowIdx) => {
-        const rowTop = pageTop + rowIdx * (rowHeight + rowGap);
+        const rowTop = pageTop + verticalOffset + rowIdx * (rowContentHeight + rowGap);
         const discount = townInfoByTownId.get(order.town_id ?? "")?.discount ?? 0;
 
         drawTable(order, "bill", pageLeft, rowTop, discount);
@@ -346,14 +409,14 @@ export function buildOrderBookPdf(
         doc.save();
         doc.dash(3, { space: 2 }).strokeColor("#999").lineWidth(0.5);
         const cutX = pageLeft + billW + scaledColGap / 2;
-        doc.moveTo(cutX, rowTop).lineTo(cutX, rowTop + rowHeight).stroke();
+        doc.moveTo(cutX, rowTop).lineTo(cutX, rowTop + rowContentHeight).stroke();
         doc.undash();
         doc.restore();
 
         // Horizontal dashed cut-line under this row (skip after the
         // last row on the page).
         if (rowIdx < pageOrders.length - 1) {
-          const lineY = rowTop + rowHeight + rowGap / 2;
+          const lineY = rowTop + rowContentHeight + rowGap / 2;
           doc.save();
           doc.dash(3, { space: 2 }).strokeColor("#999").lineWidth(0.5);
           doc.moveTo(pageLeft, lineY).lineTo(pageLeft + billW + scaledColGap + dispatchW, lineY).stroke();
