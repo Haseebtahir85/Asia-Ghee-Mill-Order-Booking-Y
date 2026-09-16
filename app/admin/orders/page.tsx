@@ -112,11 +112,36 @@ function getPresetRange(key: PresetKey): { from: string; to: string } {
   }
 }
 
+// Builds a Monday-first month grid: an array of weeks, each with 7
+// entries that are either a "YYYY-MM-DD" string or null for the
+// leading/trailing blanks outside the month.
+function getMonthMatrix(year: number, monthIdx: number): (string | null)[][] {
+  const firstOfMonth = new Date(year, monthIdx, 1);
+  const startWeekday = (firstOfMonth.getDay() + 6) % 7; // Monday = 0
+  const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
+
+  const cells: (string | null)[] = [];
+  for (let i = 0; i < startWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push(`${year}-${String(monthIdx + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+  }
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const weeks: (string | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  return weeks;
+}
+
+const WEEKDAY_LABELS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+const MONTH_LABELS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
 // A single control that opens a popover with quick presets (Today,
-// Yesterday, Last 3 Days, Last Week, Last Month) alongside a custom
-// Start/End date pair — picking a preset applies both ends and closes
-// the popover in one action, so it behaves as one date picker rather
-// than two separate fields.
+// Yesterday, Last 3 Days, Last Week, Last Month) alongside a real
+// calendar grid. The range is picked with ONE continuous gesture —
+// press down on the start day, drag across the days you want, release
+// on the end day — rather than two separate discrete clicks. Releasing
+// applies the range and closes the popover immediately; a plain
+// press-and-release on a single day (no drag) selects just that day.
 function DateRangePicker({
   from,
   to,
@@ -127,16 +152,23 @@ function DateRangePicker({
   onChange: (from: string, to: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [draftFrom, setDraftFrom] = useState(from);
-  const [draftTo, setDraftTo] = useState(to);
+  const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
+  const [viewMonth, setViewMonth] = useState(() => new Date().getMonth());
+  const [dragAnchor, setDragAnchor] = useState<string | null>(null);
+  const [dragEnd, setDragEnd] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (open) {
-      setDraftFrom(from);
-      setDraftTo(to);
-    }
-  }, [open, from, to]);
+    if (!open) return;
+    const base = from || to || todayInKarachi();
+    const d = new Date(base + "T00:00:00");
+    setViewYear(d.getFullYear());
+    setViewMonth(d.getMonth());
+    setDragAnchor(null);
+    setDragEnd(null);
+    setIsDragging(false);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!open) return;
@@ -146,6 +178,26 @@ function DateRangePicker({
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
+
+  // Finishing the drag anywhere on the page (not just on a day cell)
+  // still completes the selection — you don't have to release exactly
+  // on a calendar day for the gesture to register.
+  useEffect(() => {
+    if (!isDragging) return;
+    function finishDrag() {
+      if (dragAnchor) {
+        const a = dragAnchor;
+        const b = dragEnd || dragAnchor;
+        onChange(a < b ? a : b, a < b ? b : a);
+        setOpen(false);
+      }
+      setIsDragging(false);
+      setDragAnchor(null);
+      setDragEnd(null);
+    }
+    document.addEventListener("mouseup", finishDrag);
+    return () => document.removeEventListener("mouseup", finishDrag);
+  }, [isDragging, dragAnchor, dragEnd, onChange]);
 
   const activePreset = useMemo<PresetKey | null>(() => {
     for (const p of PRESETS) {
@@ -172,17 +224,37 @@ function DateRangePicker({
     setOpen(false);
   }
 
-  function applyCustom() {
-    onChange(draftFrom, draftTo);
+  function clearAll() {
+    onChange("", "");
     setOpen(false);
   }
 
-  function clearAll() {
-    onChange("", "");
-    setDraftFrom("");
-    setDraftTo("");
-    setOpen(false);
+  function goPrevMonth() {
+    if (viewMonth === 0) {
+      setViewYear((y) => y - 1);
+      setViewMonth(11);
+    } else {
+      setViewMonth((m) => m - 1);
+    }
   }
+
+  function goNextMonth() {
+    if (viewMonth === 11) {
+      setViewYear((y) => y + 1);
+      setViewMonth(0);
+    } else {
+      setViewMonth((m) => m + 1);
+    }
+  }
+
+  // While dragging, the preview range is whatever's between the anchor
+  // and wherever the pointer currently is — regardless of which one is
+  // chronologically earlier.
+  const previewFrom = isDragging && dragAnchor ? (dragAnchor < (dragEnd || dragAnchor) ? dragAnchor : dragEnd || dragAnchor) : from;
+  const previewTo = isDragging && dragAnchor ? (dragAnchor < (dragEnd || dragAnchor) ? dragEnd || dragAnchor : dragAnchor) : to;
+
+  const weeks = getMonthMatrix(viewYear, viewMonth);
+  const today = todayInKarachi();
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
@@ -209,6 +281,7 @@ function DateRangePicker({
             padding: 12,
             display: "flex",
             gap: 14,
+            userSelect: isDragging ? "none" : undefined,
           }}
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 120, borderRight: "1px solid #f0e6bf", paddingRight: 12 }}>
@@ -232,33 +305,7 @@ function DateRangePicker({
                 {p.label}
               </button>
             ))}
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 190 }}>
-            <div style={{ fontSize: 11, color: "#888", fontWeight: 600 }}>Custom range</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <div>
-                <label style={labelStyle}>Start</label>
-                <input
-                  type="date"
-                  value={draftFrom}
-                  max={draftTo || undefined}
-                  onChange={(e) => setDraftFrom(e.target.value)}
-                  style={filterInputStyle}
-                />
-              </div>
-              <div>
-                <label style={labelStyle}>End</label>
-                <input
-                  type="date"
-                  value={draftTo}
-                  min={draftFrom || undefined}
-                  onChange={(e) => setDraftTo(e.target.value)}
-                  style={filterInputStyle}
-                />
-              </div>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: "auto" }}>
+            <div style={{ marginTop: "auto", paddingTop: 8 }}>
               <button
                 type="button"
                 onClick={clearAll}
@@ -266,13 +313,64 @@ function DateRangePicker({
               >
                 Clear
               </button>
-              <button
-                type="button"
-                onClick={applyCustom}
-                style={{ background: NAVY, color: "#fff", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
-              >
-                Apply
-              </button>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, width: 230 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <button type="button" onClick={goPrevMonth} style={navButtonStyle} aria-label="Previous month">‹</button>
+              <div style={{ fontSize: 13, fontWeight: 600, color: NAVY }}>
+                {MONTH_LABELS[viewMonth]} {viewYear}
+              </div>
+              <button type="button" onClick={goNextMonth} style={navButtonStyle} aria-label="Next month">›</button>
+            </div>
+
+            <div style={{ fontSize: 11, color: "#888", textAlign: "center" }}>
+              Drag from the start day to the end day
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
+              {WEEKDAY_LABELS.map((wd) => (
+                <div key={wd} style={{ fontSize: 10, color: "#999", textAlign: "center", fontWeight: 600, padding: "2px 0" }}>
+                  {wd}
+                </div>
+              ))}
+              {weeks.flatMap((week, wi) =>
+                week.map((dateStr, di) => {
+                  if (!dateStr) return <div key={`${wi}-${di}`} />;
+
+                  const inPreview = previewFrom && previewTo && dateStr >= previewFrom && dateStr <= previewTo;
+                  const isEndpoint = dateStr === previewFrom || dateStr === previewTo;
+                  const isToday = dateStr === today;
+
+                  return (
+                    <div
+                      key={dateStr}
+                      onMouseDown={() => {
+                        setIsDragging(true);
+                        setDragAnchor(dateStr);
+                        setDragEnd(dateStr);
+                      }}
+                      onMouseEnter={() => {
+                        if (isDragging) setDragEnd(dateStr);
+                      }}
+                      style={{
+                        textAlign: "center",
+                        padding: "5px 0",
+                        fontSize: 12,
+                        borderRadius: isEndpoint ? 6 : 0,
+                        cursor: "pointer",
+                        background: isEndpoint ? NAVY : inPreview ? "#eef3fb" : "transparent",
+                        color: isEndpoint ? "#fff" : "#333",
+                        fontWeight: isEndpoint ? 700 : isToday ? 700 : 400,
+                        border: isToday && !isEndpoint ? `1px solid ${NAVY}` : "1px solid transparent",
+                      }}
+                    >
+                      {parseInt(dateStr.slice(8, 10), 10)}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
@@ -583,6 +681,16 @@ const filterInputStyle: React.CSSProperties = {
   borderRadius: 6,
   fontSize: 13,
   background: "#fff",
+};
+
+const navButtonStyle: React.CSSProperties = {
+  border: "none",
+  background: "none",
+  fontSize: 16,
+  color: NAVY,
+  cursor: "pointer",
+  padding: "0 6px",
+  lineHeight: 1,
 };
 
 const buttonStyle: React.CSSProperties = {
