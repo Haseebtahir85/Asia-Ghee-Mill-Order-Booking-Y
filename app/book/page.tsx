@@ -149,6 +149,9 @@ export default function BookPage() {
   const [editSearchLoading, setEditSearchLoading] = useState(false);
   const [editingOrder, setEditingOrder] = useState<{ id: string; order_number: string; town: string } | null>(null);
   const [wasEdit, setWasEdit] = useState(false);
+  const [editTownSuggestions, setEditTownSuggestions] = useState<Town[]>([]);
+  const [showEditTownDropdown, setShowEditTownDropdown] = useState(false);
+  const editTownBoxRef = useRef<HTMLDivElement>(null);
 
   // Read-only Pakistan Standard Time clock (not derived from the device's local time zone)
   const [pkTime, setPkTime] = useState(getPakistanTimeString());
@@ -186,6 +189,18 @@ export default function BookPage() {
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Same for the Edit Order popup's own town field — a separate ref
+  // since it lives in a different part of the tree (inside the modal).
+  useEffect(() => {
+    function handleClickOutsideEditTown(e: MouseEvent) {
+      if (editTownBoxRef.current && !editTownBoxRef.current.contains(e.target as Node)) {
+        setShowEditTownDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutsideEditTown);
+    return () => document.removeEventListener("mousedown", handleClickOutsideEditTown);
   }, []);
 
   // Rate and per-unit weight are fetched but never rendered per-row anymore —
@@ -274,6 +289,26 @@ export default function BookPage() {
     setTownQuery(townLabel(t));
     setTownId(t.id);
     setShowTownDropdown(false);
+  }
+
+  // Same search behavior as the main Town field, but for the Edit
+  // Order popup — no town_id needed here, since the lookup matches
+  // against the order's stored town name text, not an id.
+  function handleEditSearchTownChange(value: string) {
+    setEditSearchTown(value);
+    if (!value.trim()) {
+      setEditTownSuggestions([]);
+      setShowEditTownDropdown(false);
+      return;
+    }
+    const matches = towns.filter((t) => townMatches(t, value)).slice(0, 8);
+    setEditTownSuggestions(matches);
+    setShowEditTownDropdown(true);
+  }
+
+  function selectEditSearchTown(t: Town) {
+    setEditSearchTown(townLabel(t));
+    setShowEditTownDropdown(false);
   }
 
   // Shared validation for both the "create new order" and "edit existing
@@ -430,6 +465,8 @@ export default function BookPage() {
       setShowEditSearch(false);
       setEditSearchTown("");
       setEditSearchOrderNumber("");
+      setEditTownSuggestions([]);
+      setShowEditTownDropdown(false);
     } catch (err: any) {
       setEditSearchError(err.message || "Something went wrong.");
     } finally {
@@ -739,12 +776,25 @@ export default function BookPage() {
             </p>
             <form onSubmit={searchOrderToEdit}>
               <label style={{ display: "block", fontSize: 12, color: "#666", fontWeight: 600, marginBottom: 4 }}>Town</label>
-              <input
-                value={editSearchTown}
-                onChange={(e) => setEditSearchTown(e.target.value)}
-                placeholder="Town name"
-                style={{ width: "100%", padding: "8px 10px", marginBottom: 12, border: "1px solid #d9dde6", borderRadius: 6, boxSizing: "border-box", fontSize: 14 }}
-              />
+              <div ref={editTownBoxRef} style={{ position: "relative", marginBottom: 12 }}>
+                <input
+                  value={editSearchTown}
+                  onChange={(e) => handleEditSearchTownChange(e.target.value)}
+                  onFocus={() => editTownSuggestions.length > 0 && setShowEditTownDropdown(true)}
+                  placeholder="ٹاؤن تلاش کرنے کے لیے ٹائپ کریں..."
+                  autoComplete="off"
+                  style={{ width: "100%", padding: "8px 10px", border: "1px solid #d9dde6", borderRadius: 6, boxSizing: "border-box", fontSize: 14, ...urduFont }}
+                />
+                {showEditTownDropdown && editTownSuggestions.length > 0 && (
+                  <ul style={dropdownStyle}>
+                    {editTownSuggestions.map((t) => (
+                      <li key={t.id} onClick={() => selectEditSearchTown(t)} style={dropdownItemStyle}>
+                        {townLabel(t)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
               <label style={{ display: "block", fontSize: 12, color: "#666", fontWeight: 600, marginBottom: 4 }}>Order ID</label>
               <input
                 value={editSearchOrderNumber}
@@ -758,7 +808,11 @@ export default function BookPage() {
               <div style={{ display: "flex", gap: 10 }}>
                 <button
                   type="button"
-                  onClick={() => setShowEditSearch(false)}
+                  onClick={() => {
+                    setShowEditSearch(false);
+                    setEditTownSuggestions([]);
+                    setShowEditTownDropdown(false);
+                  }}
                   style={{ flex: 1, padding: "10px 0", background: "none", border: "1px solid #ccc", borderRadius: 8, cursor: "pointer", color: "#666", fontSize: 14 }}
                 >
                   Cancel
