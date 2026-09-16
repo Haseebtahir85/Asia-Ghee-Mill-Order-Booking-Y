@@ -136,6 +136,10 @@ export default function BookPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmedOrderNumbers, setConfirmedOrderNumbers] = useState<string[] | null>(null);
+  // Tracks which order number's "copy" button most recently succeeded, so
+  // that one button can briefly show a "Copied" confirmation. Cleared after
+  // a short delay so it doesn't get stuck if the user copies several.
+  const [copiedOrder, setCopiedOrder] = useState<string | null>(null);
   const [showQtyModal, setShowQtyModal] = useState(false);
   const [conflictModalNames, setConflictModalNames] = useState<string[] | null>(null);
   const conflictSignatureRef = useRef<string>("");
@@ -514,6 +518,46 @@ export default function BookPage() {
     setError(null);
   }
 
+  // Copies "Town Name : ..." / "Order ID   : ..." to the clipboard for one
+  // order number, using the town the order was actually booked under
+  // (still held in townQuery at this point, since it's only cleared when
+  // the confirmation screen is dismissed).
+  async function copyOrderDetails(orderNumber: string) {
+    const town = townQuery.trim() || "-";
+    const text = `Town Name : ${town}\nOrder ID   : ${orderNumber}`;
+
+    async function markCopied() {
+      setCopiedOrder(orderNumber);
+      setTimeout(() => {
+        setCopiedOrder((prev) => (prev === orderNumber ? null : prev));
+      }, 1500);
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      markCopied();
+    } catch {
+      // Clipboard API can be unavailable (older browsers, non-HTTPS, no
+      // permission) — fall back to a hidden textarea + execCommand.
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      ta.style.pointerEvents = "none";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try {
+        document.execCommand("copy");
+        markCopied();
+      } catch {
+        // Nothing more we can do — leave state as-is, no confirmation shown.
+      } finally {
+        document.body.removeChild(ta);
+      }
+    }
+  }
+
   if (confirmedOrderNumbers) {
     return (
       <div className={styles.page} style={{ overflowX: "hidden" }}>
@@ -527,21 +571,38 @@ export default function BookPage() {
             {wasEdit ? "Order updated" : "Order booked"}
           </h1>
           <p style={{ fontSize: 15, color: "#555", margin: 0 }}>
-            {wasEdit ? (
-              <>Your order <strong>{confirmedOrderNumbers[0]}</strong> has been updated.</>
-            ) : confirmedOrderNumbers.length === 1 ? (
-              <>Your order number is <strong>{confirmedOrderNumbers[0]}</strong>.</>
-            ) : (
-              <>
-                Your order numbers are:{" "}
-                <strong>{confirmedOrderNumbers.join(", ")}</strong>.
-              </>
-            )}
+            {wasEdit
+              ? "Your order has been updated."
+              : confirmedOrderNumbers.length === 1
+              ? "Your order number is:"
+              : "Your order numbers are:"}
           </p>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%", margin: "10px 0 4px" }}>
+            {confirmedOrderNumbers.map((num) => (
+              <div key={num} style={orderRowStyle}>
+                <span style={{ fontWeight: 700, color: "#0b2b5b", fontSize: 15, fontVariantNumeric: "tabular-nums" }}>
+                  {num}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => copyOrderDetails(num)}
+                  style={copyBtnStyle}
+                  title="Copy town & order ID"
+                  aria-label={`Copy town and order ID for ${num}`}
+                >
+                  {copiedOrder === num ? <SmallCheckIcon /> : <CopyIcon />}
+                  <span>{copiedOrder === num ? "Copied" : "Copy"}</span>
+                </button>
+              </div>
+            ))}
+          </div>
+
           <button
             className={styles.secondaryBtn}
             onClick={() => {
               setConfirmedOrderNumbers(null);
+              setCopiedOrder(null);
               setWasEdit(false);
               setEditingOrder(null);
               setQtys({});
@@ -989,6 +1050,25 @@ function CheckIcon() {
   );
 }
 
+// Two-rectangle "copy" glyph used on the order-confirmation copy button.
+function CopyIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="9" y="9" width="12" height="12" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+// Small checkmark shown briefly in place of CopyIcon once a copy succeeds.
+function SmallCheckIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
 // Five distinct container glyphs — each has its own silhouette so
 // tin/pack/bucket never read as the same shape at a glance:
 //   tin    -> straight cylinder, flat rim + flat base
@@ -1167,6 +1247,32 @@ const summaryGrandTotalBarStyle: React.CSSProperties = {
   background: "#fff4e0",
   borderRadius: 6,
   padding: "7px 8px",
+};
+
+const orderRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 10,
+  padding: "8px 12px",
+  background: "#f7f9fc",
+  border: "1px solid #e6e9ef",
+  borderRadius: 8,
+};
+
+const copyBtnStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 5,
+  padding: "5px 10px",
+  fontSize: 12,
+  fontWeight: 600,
+  border: "1px solid #0b2b5b",
+  color: "#0b2b5b",
+  background: "#fff",
+  borderRadius: 20,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
 };
 
 const summaryAmountBarStyle: React.CSSProperties = {
