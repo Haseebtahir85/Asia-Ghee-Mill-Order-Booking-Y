@@ -50,10 +50,19 @@ export default function AdminIndexPage() {
   // "loading" skeleton on every poll (that skeleton is only for the
   // very first load).
   const [refreshing, setRefreshing] = useState(false);
+  // Seconds remaining until the next background poll — purely a
+  // display value, recomputed every second from nextRefreshAtRef so it
+  // never drifts out of sync with the actual scheduled refresh.
+  const [secondsLeft, setSecondsLeft] = useState(REFRESH_INTERVAL_MS / 1000);
   // Guards against a slow response landing after a newer request has
   // already started (e.g. focus-refetch fires while a poll is still
   // in flight) — only the latest request is allowed to update state.
   const requestIdRef = useRef(0);
+  // Wall-clock timestamp (ms) of the next scheduled poll. Driving the
+  // countdown off a timestamp rather than a decrementing counter means
+  // it stays correct even if the tab is throttled in the background
+  // and timers fire late — it always reflects the real time left.
+  const nextRefreshAtRef = useRef(Date.now() + REFRESH_INTERVAL_MS);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,6 +86,12 @@ export default function AdminIndexPage() {
         if (cancelled || requestId !== requestIdRef.current) return;
         if (isInitial) setLoading(false);
         setRefreshing(false);
+        // Every completed fetch — scheduled or triggered by tab focus —
+        // pushes the countdown back out to a full interval, so the
+        // timer always reflects when the NEXT refresh will actually
+        // happen rather than counting toward a poll that just ran.
+        nextRefreshAtRef.current = Date.now() + REFRESH_INTERVAL_MS;
+        setSecondsLeft(REFRESH_INTERVAL_MS / 1000);
       }
     }
 
@@ -85,6 +100,12 @@ export default function AdminIndexPage() {
 
     // Background poll so new orders show up without a manual refresh.
     const intervalId = setInterval(() => loadStats(false), REFRESH_INTERVAL_MS);
+
+    // 1-second tick purely for the visible countdown display.
+    const tickId = setInterval(() => {
+      const remainingMs = nextRefreshAtRef.current - Date.now();
+      setSecondsLeft(Math.max(0, Math.ceil(remainingMs / 1000)));
+    }, 1000);
 
     // Also refetch the moment the admin switches back to this tab —
     // covers the common case where the tab sat in the background past
@@ -98,6 +119,7 @@ export default function AdminIndexPage() {
     return () => {
       cancelled = true;
       clearInterval(intervalId);
+      clearInterval(tickId);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, []);
@@ -107,9 +129,9 @@ export default function AdminIndexPage() {
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
         <div style={{ width: 6, height: 22, background: YELLOW, borderRadius: 3 }} />
         <h2 style={{ fontSize: 18, fontWeight: 700, color: NAVY, margin: 0 }}>Dashboard</h2>
-        {refreshing && (
-          <span style={{ fontSize: 11, color: "#999", marginLeft: 4 }}>Refreshing…</span>
-        )}
+        <span style={{ fontSize: 11, color: "#999", marginLeft: 4 }}>
+          {refreshing ? "Refreshing…" : `Next refresh in ${secondsLeft}s`}
+        </span>
       </div>
 
       {error && (
