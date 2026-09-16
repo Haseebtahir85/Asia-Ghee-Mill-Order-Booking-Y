@@ -1,12 +1,16 @@
 // Destination: app/admin/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 const NAVY = "#0b2b5b";
 const YELLOW = "#F6C90E";
 const RED = "#D62828";
+
+// How often to auto-refresh the dashboard stats in the background.
+// 15s keeps "new orders" feeling live without hammering the API route.
+const REFRESH_INTERVAL_MS = 15000;
 
 const SECTIONS = [
   {
@@ -41,16 +45,61 @@ export default function AdminIndexPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Tracks whether a background refresh is in flight, so we can show a
+  // subtle indicator without swapping the whole page back to the big
+  // "loading" skeleton on every poll (that skeleton is only for the
+  // very first load).
+  const [refreshing, setRefreshing] = useState(false);
+  // Guards against a slow response landing after a newer request has
+  // already started (e.g. focus-refetch fires while a poll is still
+  // in flight) — only the latest request is allowed to update state.
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
-    fetch("/api/admin/dashboard-stats", { cache: "no-store" })
-      .then((res) => res.json())
-      .then((json) => {
+    let cancelled = false;
+
+    async function loadStats(isInitial: boolean) {
+      const requestId = ++requestIdRef.current;
+      if (!isInitial) setRefreshing(true);
+      try {
+        const res = await fetch("/api/admin/dashboard-stats", { cache: "no-store" });
+        const json = await res.json();
+        if (cancelled || requestId !== requestIdRef.current) return;
         if (json.error) setError(json.error);
-        else setStats(json);
-      })
-      .catch(() => setError("Failed to load stats"))
-      .finally(() => setLoading(false));
+        else {
+          setStats(json);
+          setError(null);
+        }
+      } catch {
+        if (cancelled || requestId !== requestIdRef.current) return;
+        setError("Failed to load stats");
+      } finally {
+        if (cancelled || requestId !== requestIdRef.current) return;
+        if (isInitial) setLoading(false);
+        setRefreshing(false);
+      }
+    }
+
+    // Initial load.
+    loadStats(true);
+
+    // Background poll so new orders show up without a manual refresh.
+    const intervalId = setInterval(() => loadStats(false), REFRESH_INTERVAL_MS);
+
+    // Also refetch the moment the admin switches back to this tab —
+    // covers the common case where the tab sat in the background past
+    // the poll interval and they expect fresh numbers the instant they
+    // look at it, not up to REFRESH_INTERVAL_MS later.
+    function handleVisibility() {
+      if (document.visibilityState === "visible") loadStats(false);
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, []);
 
   return (
@@ -58,6 +107,9 @@ export default function AdminIndexPage() {
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
         <div style={{ width: 6, height: 22, background: YELLOW, borderRadius: 3 }} />
         <h2 style={{ fontSize: 18, fontWeight: 700, color: NAVY, margin: 0 }}>Dashboard</h2>
+        {refreshing && (
+          <span style={{ fontSize: 11, color: "#999", marginLeft: 4 }}>Refreshing…</span>
+        )}
       </div>
 
       {error && (
