@@ -136,6 +136,20 @@ export default function BookPage() {
   const conflictSignatureRef = useRef<string>("");
   const [showWeightLimitModal, setShowWeightLimitModal] = useState(false);
 
+  // "Edit Order" — a customer can look up an order they already placed by
+  // Town + Order ID (acting as a lightweight shared credential) and edit
+  // its quantities/town. editingOrder holds the town/order_number pair
+  // that was used to find it, since the update endpoint re-checks both
+  // again server-side before allowing any change — the order's own id is
+  // never treated as sufficient authorization by itself.
+  const [showEditSearch, setShowEditSearch] = useState(false);
+  const [editSearchTown, setEditSearchTown] = useState("");
+  const [editSearchOrderNumber, setEditSearchOrderNumber] = useState("");
+  const [editSearchError, setEditSearchError] = useState<string | null>(null);
+  const [editSearchLoading, setEditSearchLoading] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<{ id: string; order_number: string; town: string } | null>(null);
+  const [wasEdit, setWasEdit] = useState(false);
+
   // Read-only Pakistan Standard Time clock (not derived from the device's local time zone)
   const [pkTime, setPkTime] = useState(getPakistanTimeString());
 
@@ -262,7 +276,9 @@ export default function BookPage() {
     setShowTownDropdown(false);
   }
 
-  function openQtyModal(e: React.FormEvent | React.MouseEvent) {
+  // Shared validation for both the "create new order" and "edit existing
+  // order" paths — same town/conflict/weight-limit checks either way.
+  function handleFormSubmit(e: React.FormEvent | React.MouseEvent) {
     e.preventDefault();
     setError(null);
 
@@ -287,7 +303,11 @@ export default function BookPage() {
       return;
     }
 
-    setShowQtyModal(true);
+    if (editingOrder) {
+      submitEditOrder(lines);
+    } else {
+      setShowQtyModal(true);
+    }
   }
 
   async function bookOrders(copies: number) {
@@ -324,12 +344,105 @@ export default function BookPage() {
         const json = await res.json();
         orderNumbers.push(json.order.order_number);
       }
+      setWasEdit(false);
       setConfirmedOrderNumbers(orderNumbers);
     } catch (err: any) {
       setError(err.message || "Failed to submit order");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  // Updating an existing order — re-sends the same order_number + town
+  // pair used to find it in the first place, since the server treats
+  // that pair as the actual authorization, not the order's id alone.
+  async function submitEditOrder(lines: { item_id: string; qty: number }[]) {
+    if (!editingOrder) return;
+    setError(null);
+    setSubmitting(true);
+
+    try {
+      const res = await fetch(`/api/orders/${editingOrder.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          order_number: editingOrder.order_number,
+          town: editingOrder.town,
+          town_id: townId,
+          lines,
+        }),
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({ error: "Failed to update order" }));
+        throw new Error(json.error ?? "Failed to update order");
+      }
+
+      const json = await res.json();
+      setWasEdit(true);
+      setConfirmedOrderNumbers([json.order.order_number]);
+    } catch (err: any) {
+      setError(err.message || "Failed to update order");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Looks an order up by Town + Order ID and, if found, loads it into
+  // the booking form for editing (town, and every item's quantity).
+  async function searchOrderToEdit(e: React.FormEvent) {
+    e.preventDefault();
+    setEditSearchError(null);
+
+    if (!editSearchTown.trim() || !editSearchOrderNumber.trim()) {
+      setEditSearchError("Enter both Town and Order ID.");
+      return;
+    }
+
+    setEditSearchLoading(true);
+    try {
+      const res = await fetch("/api/orders/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          order_number: editSearchOrderNumber.trim(),
+          town: editSearchTown.trim(),
+        }),
+      });
+      const json = await res.json().catch(() => ({ error: "Order not found." }));
+
+      if (!res.ok) {
+        setEditSearchError(json.error ?? "Order not found.");
+        return;
+      }
+
+      const order = json.order;
+      setEditingOrder({ id: order.id, order_number: order.order_number, town: order.town });
+      setTownId(order.town_id ?? "");
+      setTownQuery(order.town ?? "");
+
+      const newQtys: Record<string, string> = {};
+      for (const line of order.order_items ?? []) {
+        if (line.item_id) newQtys[line.item_id] = String(line.qty);
+      }
+      setQtys(newQtys);
+
+      setShowEditSearch(false);
+      setEditSearchTown("");
+      setEditSearchOrderNumber("");
+    } catch (err: any) {
+      setEditSearchError(err.message || "Something went wrong.");
+    } finally {
+      setEditSearchLoading(false);
+    }
+  }
+
+  function cancelEditing() {
+    setEditingOrder(null);
+    setQtys({});
+    setTownId("");
+    setTownQuery("");
+    setError(null);
   }
 
   if (confirmedOrderNumbers) {
@@ -341,9 +454,13 @@ export default function BookPage() {
           <div className={styles.confirmIcon}>
             <CheckIcon />
           </div>
-          <h1 style={{ fontSize: 21, margin: "0 0 8px", color: "#0b2b5b" }}>Order booked</h1>
+          <h1 style={{ fontSize: 21, margin: "0 0 8px", color: "#0b2b5b" }}>
+            {wasEdit ? "Order updated" : "Order booked"}
+          </h1>
           <p style={{ fontSize: 15, color: "#555", margin: 0 }}>
-            {confirmedOrderNumbers.length === 1 ? (
+            {wasEdit ? (
+              <>Your order <strong>{confirmedOrderNumbers[0]}</strong> has been updated.</>
+            ) : confirmedOrderNumbers.length === 1 ? (
               <>Your order number is <strong>{confirmedOrderNumbers[0]}</strong>.</>
             ) : (
               <>
@@ -356,6 +473,8 @@ export default function BookPage() {
             className={styles.secondaryBtn}
             onClick={() => {
               setConfirmedOrderNumbers(null);
+              setWasEdit(false);
+              setEditingOrder(null);
               setQtys({});
               setTownId("");
               setTownQuery("");
@@ -374,7 +493,42 @@ export default function BookPage() {
     <main className={styles.wrapper} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
       <Header />
 
-      <form onSubmit={openQtyModal}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <button type="button" onClick={() => setShowEditSearch(true)} style={editOrderButtonStyle}>
+          Edit Order
+        </button>
+      </div>
+
+      {editingOrder && (
+        <div
+          style={{
+            background: "#eef3fb",
+            border: "1px solid #cddaf0",
+            borderRadius: 8,
+            padding: "8px 12px",
+            marginBottom: 10,
+            fontSize: 13,
+            color: "#0b2b5b",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <span>
+            Editing order <strong>{editingOrder.order_number}</strong> ({editingOrder.town})
+          </span>
+          <button
+            type="button"
+            onClick={cancelEditing}
+            style={{ background: "none", border: "none", color: "#0b2b5b", textDecoration: "underline", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      <form onSubmit={handleFormSubmit}>
         <div className={styles.card} style={{ overflow: "visible", position: "relative", zIndex: 10 }}>
           <div className={styles.fieldGrid}>
             <div style={{ gridColumn: "1 / -1", position: "relative", zIndex: 50 }} ref={townBoxRef}>
@@ -541,7 +695,13 @@ export default function BookPage() {
           className={styles.submitBtn}
           style={{ width: "100%", display: "block", ...urduFont }}
         >
-          {submitting ? "بک ہو رہا ہے..." : "ابھی بک کریں"}
+          {submitting
+            ? editingOrder
+              ? "تبدیل ہو رہا ہے..."
+              : "بک ہو رہا ہے..."
+            : editingOrder
+            ? "تبدیل کریں"
+            : "ابھی بک کریں"}
         </button>
       </form>
 
@@ -569,6 +729,52 @@ export default function BookPage() {
           </div>
         </div>
       </div>
+
+      {showEditSearch && (
+        <div style={modalOverlayStyle} onClick={() => setShowEditSearch(false)}>
+          <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontSize: 17, margin: "0 0 4px", color: "#0b2b5b" }}>Edit Order</h2>
+            <p style={{ fontSize: 13, color: "#666", margin: "0 0 14px" }}>
+              Enter the Town and Order ID exactly as they were used to book it.
+            </p>
+            <form onSubmit={searchOrderToEdit}>
+              <label style={{ display: "block", fontSize: 12, color: "#666", fontWeight: 600, marginBottom: 4 }}>Town</label>
+              <input
+                value={editSearchTown}
+                onChange={(e) => setEditSearchTown(e.target.value)}
+                placeholder="Town name"
+                style={{ width: "100%", padding: "8px 10px", marginBottom: 12, border: "1px solid #d9dde6", borderRadius: 6, boxSizing: "border-box", fontSize: 14 }}
+              />
+              <label style={{ display: "block", fontSize: 12, color: "#666", fontWeight: 600, marginBottom: 4 }}>Order ID</label>
+              <input
+                value={editSearchOrderNumber}
+                onChange={(e) => setEditSearchOrderNumber(e.target.value)}
+                placeholder="e.g. 26090001"
+                style={{ width: "100%", padding: "8px 10px", marginBottom: 14, border: "1px solid #d9dde6", borderRadius: 6, boxSizing: "border-box", fontSize: 14 }}
+              />
+              {editSearchError && (
+                <div style={{ color: "#d62828", fontSize: 13, marginBottom: 12 }}>{editSearchError}</div>
+              )}
+              <div style={{ display: "flex", gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowEditSearch(false)}
+                  style={{ flex: 1, padding: "10px 0", background: "none", border: "1px solid #ccc", borderRadius: 8, cursor: "pointer", color: "#666", fontSize: 14 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSearchLoading}
+                  style={{ ...qtyOptionButtonStyle, flex: 1 }}
+                >
+                  {editSearchLoading ? "Searching..." : "Search"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {showQtyModal && (
         <div style={modalOverlayStyle} onClick={() => setShowQtyModal(false)}>
@@ -754,6 +960,17 @@ const dropdownItemStyle: React.CSSProperties = {
   fontSize: 14,
   cursor: "pointer",
   borderRadius: 6,
+};
+
+const editOrderButtonStyle: React.CSSProperties = {
+  padding: "5px 14px",
+  fontSize: 12,
+  fontWeight: 600,
+  border: "1px solid #0b2b5b",
+  color: "#0b2b5b",
+  background: "#fff",
+  borderRadius: 20,
+  cursor: "pointer",
 };
 
 const modalOverlayStyle: React.CSSProperties = {
