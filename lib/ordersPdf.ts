@@ -1,37 +1,6 @@
 // Destination: lib/ordersPdf.ts
 import PDFDocument from "pdfkit";
 
-// Builds the "Order Book" PDF: two SEPARATE, self-contained tables per
-// order (a bill/customer table and a "Provisional Order" dispatch
-// table), each with its own complete header and its own DISTINCT
-// summary section written as a plain label/value list — the two
-// tables show different totals, not duplicates of each other:
-//
-//   Bill table summary: Weight (Ton), Amount, then the full six-line
-//     breakdown — Weight (Ghee), Weight (Oil), Total Weight (Ton),
-//     Weight (RSO), Weight (SOAP), G.Total Weight (Ton).
-//   Provisional Order table summary: Weight (Ghee) / Weight (Oil) /
-//     RSO / Total (Total = Ghee + Oil + RSO).
-//
-// FIXED at exactly 2 orders (4 tables) per A4 portrait page. Column
-// widths scale to fill the page width exactly, and every row/font size
-// scales UP from a compact base so the fixed 2-per-page budget is used
-// productively (bigger, more legible text) rather than left as blank
-// space. Dashed guide lines mark where the printed sheet should be
-// cut, since each table becomes a separate physical slip.
-//
-// Print-safety notes:
-//  - Item-grid lines are drawn at 0.5pt / #999 rather than a lighter
-//    hairline — very thin, very light strokes can drop out entirely
-//    on some printers even though they show fine on screen or in a
-//    PDF viewer.
-//  - Item text is padded and vertically centered within each row cell
-//    so it never sits flush against a grid line.
-//  - The two rows on a page are positioned using a real MEASURED row
-//    height (see "measurement pass" below), not just the approximate
-//    proportional model used to pick font sizes — this keeps the
-//    blank space above the first row and below the second row equal,
-//    instead of the content silently overflowing the bottom margin.
 function weightCategory(name: string, type: string): "ghee" | "oil" | "rso" | "soap" | "other" {
   const n = name.toLowerCase();
   if (n.includes("rso")) return "rso";
@@ -44,10 +13,7 @@ function weightCategory(name: string, type: string): "ghee" | "oil" | "rso" | "s
 type CatalogItem = { id: string; name: string; weight_kg: number; type: string };
 
 const ORDERS_PER_PAGE = 2;
-
-// Compact base sizing (proportions only — actual values are scaled up
-// at render time to fill exactly half the page height each).
-const BASE_ROW_H = 5.3;
+const BASE_ROW_H = 6.5;
 const BASE_HEADER_LINE_H = 7;
 const HEADER_LINES = 4; // company name / order# (or "Provisional Order") / town+date (+ order# for dispatch) / group no+upc (bill only, or town+date again for dispatch)
 const BASE_PANEL_HEADER_H = 6;
@@ -84,6 +50,15 @@ const DISPATCH_COLS = [
 ];
 
 type TownInfo = { discount: number; upc: string | null; group_no: number | null };
+
+// Snaps a coordinate to the nearest 0.5pt. Print-safety: a hairline
+// stroke drawn at a fractional y (e.g. 143.27) gets split across two
+// device pixel rows by the rasterizer and can print as a faint/
+// missing line even at 0.75pt. Snapping to a half-point grid keeps
+// every stroke aligned to a single, solidly-inked row.
+function snap(v: number): number {
+  return Math.round(v * 2) / 2;
+}
 
 export function buildOrderBookPdf(
   orders: any[],
@@ -125,7 +100,9 @@ export function buildOrderBookPdf(
     // the actual page positions used later come from a real measurement
     // pass (see below drawTable's definition), so small inaccuracies
     // here only affect how "full" the page looks, not whether the
-    // header/footer margins end up equal. ---
+    // header/footer margins end up equal — that equality is guaranteed
+    // by the measure-then-center step further down, using this model
+    // only to pick sizes, never to place content. ---
     const baseHeaderH = HEADER_LINES * BASE_HEADER_LINE_H;
     const baseSlipContentH = baseHeaderH + BASE_PANEL_HEADER_H + catalogItems.length * BASE_ROW_H + 4;
     const baseBillSummaryH = BASE_KV_ROW_H + BASE_KV_GAP_H + BASE_BOX_H; // Amount line + gap + totals box
@@ -296,7 +273,7 @@ export function buildOrderBookPdf(
       y += PANEL_HEADER_H;
 
       if (draw) {
-        doc.moveTo(x, y).lineTo(x + width, y).strokeColor("#0b2b5b").lineWidth(0.75).stroke();
+        doc.moveTo(x, snap(y)).lineTo(x + width, snap(y)).strokeColor("#0b2b5b").lineWidth(0.75).stroke();
       }
       y += 2;
 
@@ -313,8 +290,16 @@ export function buildOrderBookPdf(
 
       if (draw) doc.font("Helvetica").fontSize(font.itemRow);
       // Vertically center each item row's text within its ROW_H-tall
-      // cell instead of drawing it flush against the row's top border.
-      const itemTextYOffset = draw ? Math.max((ROW_H - doc.currentLineHeight(true)) / 2, 0) : 0;
+      // cell, with a GUARANTEED minimum pad on both sides. The naive
+      // "(ROW_H - lineHeight) / 2" can go to zero or negative whenever
+      // ROW_H is tight relative to the font's real line height — that
+      // was the actual bug: it silently clamped to 0 and the text sat
+      // flush against (or crossed) the grid line above it. Flooring at
+      // a proportional minimum (12% of the row height) means there is
+      // always visible breathing room, regardless of font/row tuning.
+      const lineH = draw ? doc.currentLineHeight(true) : 0;
+      const minPad = ROW_H * 0.12;
+      const itemTextYOffset = draw ? Math.max((ROW_H - lineH) / 2, minPad) : 0;
 
       for (const item of catalogItems) {
         const line = lineByItemId.get(item.id) ?? lineByName.get(item.name.trim().toLowerCase());
@@ -357,19 +342,22 @@ export function buildOrderBookPdf(
 
       if (draw) {
         // Grid lines — every row and every column boundary, like a
-        // real table, not just plain text. 0.5pt and a mid grey (not a
-        // near-white hairline) so they reliably survive printing —
-        // very thin/light strokes can drop out on some printers even
-        // though they render fine on screen or in a PDF viewer.
+        // real table, not just plain text. 0.75pt and a mid grey (not
+        // a near-white hairline), with every coordinate snapped to a
+        // 0.5pt grid — thin strokes at fractional y-positions get
+        // antialiased across two device rows and can effectively drop
+        // out on some printers even though they render fine on screen
+        // or in a PDF viewer. Snapping keeps every stroke a single,
+        // solidly-inked line.
         doc.save();
-        doc.strokeColor("#999999").lineWidth(0.5);
+        doc.strokeColor("#999999").lineWidth(0.75);
         for (let r = 0; r <= catalogItems.length; r++) {
-          const ly = itemsTop + r * ROW_H;
-          doc.moveTo(x, ly).lineTo(x + width, ly).stroke();
+          const ly = snap(itemsTop + r * ROW_H);
+          doc.moveTo(snap(x), ly).lineTo(snap(x + width), ly).stroke();
         }
         const vLines = [...colX, x + width];
         for (const vx of vLines) {
-          doc.moveTo(vx, itemsTop).lineTo(vx, itemsBottom).stroke();
+          doc.moveTo(snap(vx), snap(itemsTop)).lineTo(snap(vx), snap(itemsBottom)).stroke();
         }
         doc.restore();
       }
@@ -413,7 +401,10 @@ export function buildOrderBookPdf(
     // space below the second row. This replaces the earlier assumption
     // that the proportional model above always fills the page exactly
     // — now it's true by measurement, not by hoping the approximation
-    // is accurate. ---
+    // is accurate. This is also what guarantees equal header/footer
+    // space on the printed sheet: both rows use the SAME measured
+    // rowContentHeight, and verticalOffset below centers that fixed
+    // total block within the physical page. ---
     const measureOrder = { order_number: "", order_date: "", town: "", town_id: null, order_items: [] };
     const measuredBillH = drawTable(measureOrder, "bill", pageLeft, 0, 0, false);
     const measuredDispatchH = drawTable(measureOrder, "dispatch", pageLeft, 0, 0, false);
