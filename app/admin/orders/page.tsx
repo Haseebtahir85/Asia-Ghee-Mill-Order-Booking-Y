@@ -45,9 +45,78 @@ function formatDateLabel(iso: string): string {
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-// A single control that opens a small popover with two native date inputs
-// (Start/End) instead of two separate fields sitting in the filter bar —
-// picking both, then closing, is "one date picker" for the whole range.
+// Returns a plain YYYY-MM-DD string for "today" in Pakistan time, so
+// presets line up with the same calendar day the rest of the app uses.
+function todayInKarachi(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Karachi" }).format(new Date());
+}
+
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function startOfWeek(dateStr: string): string {
+  // Monday as the first day of the week
+  const d = new Date(dateStr + "T00:00:00");
+  const day = d.getDay(); // 0 = Sunday
+  const diff = day === 0 ? 6 : day - 1;
+  return addDays(dateStr, -diff);
+}
+
+function startOfMonth(dateStr: string): string {
+  const d = new Date(dateStr + "T00:00:00");
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function endOfLastMonth(dateStr: string): string {
+  return addDays(startOfMonth(dateStr), -1);
+}
+
+function startOfLastMonth(dateStr: string): string {
+  return startOfMonth(endOfLastMonth(dateStr));
+}
+
+type PresetKey = "today" | "yesterday" | "last3" | "lastWeek" | "lastMonth";
+
+const PRESETS: { key: PresetKey; label: string }[] = [
+  { key: "today", label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
+  { key: "last3", label: "Last 3 Days" },
+  { key: "lastWeek", label: "Last Week" },
+  { key: "lastMonth", label: "Last Month" },
+];
+
+function getPresetRange(key: PresetKey): { from: string; to: string } {
+  const today = todayInKarachi();
+  switch (key) {
+    case "today":
+      return { from: today, to: today };
+    case "yesterday": {
+      const y = addDays(today, -1);
+      return { from: y, to: y };
+    }
+    case "last3":
+      return { from: addDays(today, -2), to: today };
+    case "lastWeek": {
+      const thisWeekStart = startOfWeek(today);
+      const lastWeekStart = addDays(thisWeekStart, -7);
+      const lastWeekEnd = addDays(thisWeekStart, -1);
+      return { from: lastWeekStart, to: lastWeekEnd };
+    }
+    case "lastMonth":
+      return { from: startOfLastMonth(today), to: endOfLastMonth(today) };
+    default:
+      return { from: "", to: "" };
+  }
+}
+
+// A single control that opens a popover with quick presets (Today,
+// Yesterday, Last 3 Days, Last Week, Last Month) alongside a custom
+// Start/End date pair — picking a preset applies both ends and closes
+// the popover in one action, so it behaves as one date picker rather
+// than two separate fields.
 function DateRangePicker({
   from,
   to,
@@ -58,7 +127,16 @@ function DateRangePicker({
   onChange: (from: string, to: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [draftFrom, setDraftFrom] = useState(from);
+  const [draftTo, setDraftTo] = useState(to);
   const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      setDraftFrom(from);
+      setDraftTo(to);
+    }
+  }, [open, from, to]);
 
   useEffect(() => {
     if (!open) return;
@@ -69,12 +147,51 @@ function DateRangePicker({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  const label = from && to ? `${formatDateLabel(from)} – ${formatDateLabel(to)}` : from ? `From ${formatDateLabel(from)}` : to ? `Until ${formatDateLabel(to)}` : "All dates";
+  const activePreset = useMemo<PresetKey | null>(() => {
+    for (const p of PRESETS) {
+      const r = getPresetRange(p.key);
+      if (r.from === from && r.to === to) return p.key;
+    }
+    return null;
+  }, [from, to]);
+
+  const label =
+    from && to
+      ? from === to
+        ? formatDateLabel(from)
+        : `${formatDateLabel(from)} – ${formatDateLabel(to)}`
+      : from
+      ? `From ${formatDateLabel(from)}`
+      : to
+      ? `Until ${formatDateLabel(to)}`
+      : "All dates";
+
+  function applyPreset(key: PresetKey) {
+    const r = getPresetRange(key);
+    onChange(r.from, r.to);
+    setOpen(false);
+  }
+
+  function applyCustom() {
+    onChange(draftFrom, draftTo);
+    setOpen(false);
+  }
+
+  function clearAll() {
+    onChange("", "");
+    setDraftFrom("");
+    setDraftTo("");
+    setOpen(false);
+  }
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
       <label style={labelStyle}>Date range</label>
-      <button type="button" onClick={() => setOpen((o) => !o)} style={{ ...filterInputStyle, textAlign: "left", cursor: "pointer", minWidth: 170 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{ ...filterInputStyle, textAlign: "left", cursor: "pointer", minWidth: 190 }}
+      >
         {label}
       </button>
 
@@ -91,37 +208,72 @@ function DateRangePicker({
             boxShadow: "0 6px 16px rgba(0,0,0,0.12)",
             padding: 12,
             display: "flex",
-            flexDirection: "column",
-            gap: 8,
+            gap: 14,
           }}
         >
-          <div style={{ display: "flex", gap: 8 }}>
-            <div>
-              <label style={labelStyle}>Start</label>
-              <input type="date" value={from} max={to || undefined} onChange={(e) => onChange(e.target.value, to)} style={filterInputStyle} />
-            </div>
-            <div>
-              <label style={labelStyle}>End</label>
-              <input type="date" value={to} min={from || undefined} onChange={(e) => onChange(from, e.target.value)} style={filterInputStyle} />
-            </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 120, borderRight: "1px solid #f0e6bf", paddingRight: 12 }}>
+            {PRESETS.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                onClick={() => applyPreset(p.key)}
+                style={{
+                  textAlign: "left",
+                  padding: "6px 8px",
+                  fontSize: 13,
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  background: activePreset === p.key ? NAVY : "transparent",
+                  color: activePreset === p.key ? "#fff" : "#333",
+                  fontWeight: activePreset === p.key ? 600 : 500,
+                }}
+              >
+                {p.label}
+              </button>
+            ))}
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-            <button
-              type="button"
-              onClick={() => {
-                onChange("", "");
-              }}
-              style={{ background: "none", border: "none", color: "#888", fontSize: 12, cursor: "pointer", padding: 0 }}
-            >
-              Clear
-            </button>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              style={{ background: NAVY, color: "#fff", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
-            >
-              Done
-            </button>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 190 }}>
+            <div style={{ fontSize: 11, color: "#888", fontWeight: 600 }}>Custom range</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div>
+                <label style={labelStyle}>Start</label>
+                <input
+                  type="date"
+                  value={draftFrom}
+                  max={draftTo || undefined}
+                  onChange={(e) => setDraftFrom(e.target.value)}
+                  style={filterInputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>End</label>
+                <input
+                  type="date"
+                  value={draftTo}
+                  min={draftFrom || undefined}
+                  onChange={(e) => setDraftTo(e.target.value)}
+                  style={filterInputStyle}
+                />
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: "auto" }}>
+              <button
+                type="button"
+                onClick={clearAll}
+                style={{ background: "none", border: "none", color: "#888", fontSize: 12, cursor: "pointer", padding: 0 }}
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={applyCustom}
+                style={{ background: NAVY, color: "#fff", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+              >
+                Apply
+              </button>
+            </div>
           </div>
         </div>
       )}

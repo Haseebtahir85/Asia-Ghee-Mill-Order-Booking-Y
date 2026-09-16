@@ -18,7 +18,7 @@ const urduFont: React.CSSProperties = {
 // how many items or which pack family — may be booked past this limit.
 // The backend enforces 10.4 exactly; the user-facing message rounds down to
 // "10 Ton" and must always read this way, not "10.4".
-const MAX_GRAND_TOTAL_TON = 10.4;
+const MAX_GRAND_TOTAL_TON = 10.05;
 const WEIGHT_LIMIT_MESSAGE =
   "کل وزن 10 ٹن سے زیادہ نہیں ہو سکتا۔ براہ کرم اپنے وزن کو کم کریں اور دوبارہ کوشش کریں۔";
 
