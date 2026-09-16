@@ -1,6 +1,44 @@
 // Destination: lib/ordersPdf.ts
 import PDFDocument from "pdfkit";
 
+// Builds the "Order Book" PDF: two SEPARATE, self-contained tables per
+// order (a bill/customer table and a "Provisional Order" dispatch
+// table), each with its own complete header and its own DISTINCT
+// summary section written as a plain label/value list — the two
+// tables show different totals, not duplicates of each other:
+//
+//   Bill table summary: Weight (Ton), Amount, then the full six-line
+//     breakdown — Weight (Ghee), Weight (Oil), Total Weight (Ton),
+//     Weight (RSO), Weight (SOAP), G.Total Weight (Ton).
+//   Provisional Order table summary: Weight (Ghee) / Weight (Oil) /
+//     RSO / Total (Total = Ghee + Oil + RSO).
+//
+// FIXED at exactly 2 orders (4 tables) per A4 portrait page. Column
+// widths scale to fill the page width exactly, and every row/font size
+// scales UP from a compact base so the fixed 2-per-page budget is used
+// productively (bigger, more legible text) rather than left as blank
+// space. Dashed guide lines mark where the printed sheet should be
+// cut, since each table becomes a separate physical slip.
+//
+// Print-safety notes:
+//  - Item-grid lines are drawn at 0.75pt / #999 and snapped to a
+//    0.5pt coordinate grid. A 0.5pt line at a non-half-point y
+//    position gets antialiased across two device rows on some raster
+//    print drivers and can effectively vanish even though it renders
+//    fine on screen or in a PDF viewer — 0.75pt + snapped coordinates
+//    keeps it a single solid printed line.
+//  - Item text is vertically centered within each row cell with a
+//    GUARANTEED minimum top/bottom pad (see itemTextYOffset below),
+//    not just "row height minus line height" — that quantity used to
+//    be able to go to zero (or effectively negative, clamped to 0)
+//    whenever the row height was tight relative to the font's real
+//    line height, which is exactly what made text sit flush against
+//    the grid line above it.
+//  - The two rows on a page are positioned using a real MEASURED row
+//    height (see "measurement pass" below), not just the approximate
+//    proportional model used to pick font sizes — this keeps the
+//    blank space above the first row and below the second row equal,
+//    instead of the content silently overflowing the bottom margin.
 function weightCategory(name: string, type: string): "ghee" | "oil" | "rso" | "soap" | "other" {
   const n = name.toLowerCase();
   if (n.includes("rso")) return "rso";
@@ -13,6 +51,16 @@ function weightCategory(name: string, type: string): "ghee" | "oil" | "rso" | "s
 type CatalogItem = { id: string; name: string; weight_kg: number; type: string };
 
 const ORDERS_PER_PAGE = 2;
+
+// Compact base sizing (proportions only — actual values are scaled up
+// at render time to fill exactly half the page height each).
+//
+// BASE_ROW_H was raised from 5.3 to 6.5: a 5pt Helvetica row's real
+// line height is ~5.7-5.8pt, i.e. TALLER than the old 5.3 row height.
+// That meant there was structurally never any room to center text
+// inside the row — the offset calc always clamped to 0 and the glyph
+// box just overflowed into the grid line above it. 6.5 guarantees
+// real headroom for padding on both sides at any scale.
 const BASE_ROW_H = 6.5;
 const BASE_HEADER_LINE_H = 7;
 const HEADER_LINES = 4; // company name / order# (or "Provisional Order") / town+date (+ order# for dispatch) / group no+upc (bill only, or town+date again for dispatch)
@@ -290,16 +338,23 @@ export function buildOrderBookPdf(
 
       if (draw) doc.font("Helvetica").fontSize(font.itemRow);
       // Vertically center each item row's text within its ROW_H-tall
-      // cell, with a GUARANTEED minimum pad on both sides. The naive
-      // "(ROW_H - lineHeight) / 2" can go to zero or negative whenever
-      // ROW_H is tight relative to the font's real line height — that
-      // was the actual bug: it silently clamped to 0 and the text sat
-      // flush against (or crossed) the grid line above it. Flooring at
-      // a proportional minimum (12% of the row height) means there is
-      // always visible breathing room, regardless of font/row tuning.
-      const lineH = draw ? doc.currentLineHeight(true) : 0;
+      // cell. Two things were wrong before:
+      //  1) ROW_H used to be smaller than the font's real line height,
+      //     so the offset clamped to 0 (fixed by the BASE_ROW_H bump
+      //     above).
+      //  2) doc.currentLineHeight(true) includes the font's internal
+      //     line-GAP (leading) on top of ascent+descent — that's
+      //     larger than the text's actual visual (inked) height, so
+      //     using it as "lineH" overstates how much vertical space the
+      //     text needs and understates the true center offset. The
+      //     text then rendered with a visibly smaller gap above it
+      //     than below it, even though the row itself had headroom.
+      //     Using the font size directly (a close, predictable proxy
+      //     for Helvetica's cap-to-baseline+descender height at these
+      //     small sizes) gives a much closer visual center.
+      const visualTextH = draw ? font.itemRow : 0;
       const minPad = ROW_H * 0.12;
-      const itemTextYOffset = draw ? Math.max((ROW_H - lineH) / 2, minPad) : 0;
+      const itemTextYOffset = draw ? Math.max((ROW_H - visualTextH) / 2, minPad) : 0;
 
       for (const item of catalogItems) {
         const line = lineByItemId.get(item.id) ?? lineByName.get(item.name.trim().toLowerCase());
