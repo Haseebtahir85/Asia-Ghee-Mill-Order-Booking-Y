@@ -352,7 +352,7 @@ export function buildOrderBookPdf(
       //     Using the font size directly (a close, predictable proxy
       //     for Helvetica's cap-to-baseline+descender height at these
       //     small sizes) gives a much closer visual center.
-      const visualTextH = draw ? font.itemRow : 0;
+      const visualTextH = draw ? font.itemRow * 0.72 : 0;
       const minPad = ROW_H * 0.12;
       const itemTextYOffset = draw ? Math.max((ROW_H - visualTextH) / 2, minPad) : 0;
 
