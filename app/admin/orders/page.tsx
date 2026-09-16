@@ -389,6 +389,8 @@ export default function AdminOrdersPage() {
   const [exporting, setExporting] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [exportingNew, setExportingNew] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -536,6 +538,73 @@ export default function AdminOrdersPage() {
     loadOrders();
   }
 
+  // Shared delete call for both the single-row Delete button and the
+  // bulk Delete button — same endpoint either way, just a different
+  // ids array. On success, removed orders drop out of both the loaded
+  // list and the current selection immediately (no refetch needed).
+  async function deleteOrders(ids: string[]) {
+    if (ids.length === 0) return;
+    setError(null);
+    setNotice(null);
+
+    try {
+      const res = await fetch("/api/admin/orders", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setError(json.error ?? "Failed to delete order(s)");
+        return;
+      }
+
+      const deletedIds: string[] = json.deletedCount != null ? json.deleted ?? ids : ids;
+      const removed = new Set(deletedIds);
+      setAllOrders((prev) => prev.filter((o) => !removed.has(o.id)));
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const id of deletedIds) next.delete(id);
+        return next;
+      });
+
+      const notFoundCount: number = Array.isArray(json.notFound) ? json.notFound.length : 0;
+      if (deletedIds.length === 0) {
+        setError("No matching order(s) found to delete.");
+      } else if (notFoundCount > 0) {
+        setNotice(`${deletedIds.length} order(s) deleted. ${notFoundCount} were already gone.`);
+      } else {
+        setNotice(deletedIds.length === 1 ? "Order deleted." : `${deletedIds.length} orders deleted.`);
+      }
+    } catch {
+      setError("Failed to delete order(s)");
+    }
+  }
+
+  async function deleteOne(order: Order) {
+    const ok = window.confirm(`Delete order ${order.order_number}? This cannot be undone.`);
+    if (!ok) return;
+    setDeletingId(order.id);
+    await deleteOrders([order.id]);
+    setDeletingId(null);
+  }
+
+  async function deleteBulk() {
+    const ids = selected.size > 0 ? Array.from(selected) : filteredOrders.map((o) => o.id);
+    if (ids.length === 0) return;
+    const ok = window.confirm(
+      selected.size > 0
+        ? `Delete ${ids.length} selected order(s)? This cannot be undone.`
+        : `Delete all ${ids.length} filtered order(s)? This cannot be undone.`
+    );
+    if (!ok) return;
+    setDeleting(true);
+    await deleteOrders(ids);
+    setDeleting(false);
+  }
+
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif", background: "#fffdf5", minHeight: "100vh" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
@@ -577,12 +646,24 @@ export default function AdminOrdersPage() {
           <DateRangePicker from={dateFrom} to={dateTo} onChange={(f, t) => { setDateFrom(f); setDateTo(t); }} />
         </div>
 
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button type="button" onClick={exportNewOrders} disabled={exportingNew} style={secondaryButtonStyle}>
             {exportingNew ? "Checking..." : "New Order"}
           </button>
           <button onClick={exportBulk} disabled={exporting || filteredOrders.length === 0} style={buttonStyle}>
             {exporting ? "Exporting..." : selected.size > 0 ? `Export Selected (${selected.size})` : "Export All (filtered)"}
+          </button>
+          <button
+            type="button"
+            onClick={deleteBulk}
+            disabled={deleting || filteredOrders.length === 0}
+            style={deleteButtonStyle}
+          >
+            {deleting
+              ? "Deleting..."
+              : selected.size > 0
+              ? `Delete Selected (${selected.size})`
+              : "Delete All (filtered)"}
           </button>
         </div>
       </div>
@@ -659,6 +740,13 @@ export default function AdminOrdersPage() {
                       >
                         {exportingId === o.id ? "..." : "Export"}
                       </button>
+                      <button
+                        onClick={() => deleteOne(o)}
+                        disabled={deletingId === o.id}
+                        style={deleteRowButtonStyle}
+                      >
+                        {deletingId === o.id ? "..." : "Delete"}
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -714,6 +802,20 @@ const secondaryButtonStyle: React.CSSProperties = {
   fontSize: 13,
 };
 
+// Red-filled bulk delete button, sitting next to the Export button so
+// it reads as the destructive counterpart of "Export All (filtered)" /
+// "Export Selected (n)" — same sizing, opposite weight.
+const deleteButtonStyle: React.CSSProperties = {
+  padding: "8px 16px",
+  background: RED,
+  color: "#fff",
+  border: "none",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontWeight: 600,
+  fontSize: 13,
+};
+
 const editButtonStyle: React.CSSProperties = {
   display: "inline-block",
   padding: "4px 12px",
@@ -723,6 +825,20 @@ const editButtonStyle: React.CSSProperties = {
   color: NAVY,
   borderRadius: 6,
   textDecoration: "none",
+};
+
+// Red-filled per-row delete button, matching editButtonStyle's sizing
+// so it sits flush with the Edit / Export buttons in the row.
+const deleteRowButtonStyle: React.CSSProperties = {
+  display: "inline-block",
+  padding: "4px 12px",
+  fontSize: 12,
+  fontWeight: 600,
+  border: `1px solid ${RED}`,
+  color: "#fff",
+  background: RED,
+  borderRadius: 6,
+  cursor: "pointer",
 };
 
 const thStyle: React.CSSProperties = { padding: "9px 6px", fontSize: 13, color: "#fff", fontWeight: 700 };
