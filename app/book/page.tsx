@@ -430,7 +430,7 @@ export default function BookPage() {
     setEditSearchError(null);
 
     if (!editSearchTown.trim() || !editSearchOrderNumber.trim()) {
-      setEditSearchError("Enter both Town and Order ID.");
+      setEditSearchError("براہ کرم ٹاؤن اور آرڈر آئی ڈی دونوں درج کریں۔");
       return;
     }
 
@@ -444,10 +444,10 @@ export default function BookPage() {
           town: editSearchTown.trim(),
         }),
       });
-      const json = await res.json().catch(() => ({ error: "Order not found." }));
+      const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        setEditSearchError(json.error ?? "Order not found.");
+        setEditSearchError("دیا گیا ٹاؤن اور آرڈر آئی ڈی سے کوئی آرڈر نہیں ملا۔ براہ کرم دوبارہ چیک کریں۔");
         return;
       }
 
@@ -468,7 +468,7 @@ export default function BookPage() {
       setEditTownSuggestions([]);
       setShowEditTownDropdown(false);
     } catch (err: any) {
-      setEditSearchError(err.message || "Something went wrong.");
+      setEditSearchError("کچھ غلط ہو گیا۔ براہ کرم دوبارہ کوشش کریں۔");
     } finally {
       setEditSearchLoading(false);
     }
@@ -531,8 +531,8 @@ export default function BookPage() {
       <Header />
 
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-        <button type="button" onClick={() => setShowEditSearch(true)} style={editOrderButtonStyle}>
-          Edit Order
+        <button type="button" onClick={() => setShowEditSearch(true)} style={{ ...editOrderButtonStyle, ...urduFont }}>
+          آرڈر میں تبدیلی
         </button>
       </div>
 
@@ -550,17 +550,19 @@ export default function BookPage() {
             justifyContent: "space-between",
             alignItems: "center",
             gap: 10,
+            ...urduFont,
+            direction: "rtl",
           }}
         >
           <span>
-            Editing order <strong>{editingOrder.order_number}</strong> ({editingOrder.town})
+            آرڈر میں ترمیم ہو رہی ہے: <strong>{editingOrder.order_number}</strong> ({editingOrder.town})
           </span>
           <button
             type="button"
             onClick={cancelEditing}
-            style={{ background: "none", border: "none", color: "#0b2b5b", textDecoration: "underline", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}
+            style={{ background: "none", border: "none", color: "#0b2b5b", textDecoration: "underline", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap", ...urduFont }}
           >
-            Cancel
+            منسوخ کریں
           </button>
         </div>
       )}
@@ -770,12 +772,12 @@ export default function BookPage() {
       {showEditSearch && (
         <div style={modalOverlayStyle} onClick={() => setShowEditSearch(false)}>
           <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
-            <h2 style={{ fontSize: 17, margin: "0 0 4px", color: "#0b2b5b" }}>Edit Order</h2>
-            <p style={{ fontSize: 13, color: "#666", margin: "0 0 14px" }}>
-              Enter the Town and Order ID exactly as they were used to book it.
+            <h2 style={{ fontSize: 17, margin: "0 0 4px", color: "#0b2b5b", ...urduFont, textAlign: "right" }}>آرڈر میں تبدیلی</h2>
+            <p style={{ fontSize: 13, color: "#666", margin: "0 0 14px", ...urduFont, textAlign: "right" }}>
+              وہی ٹاؤن اور آرڈر آئی ڈی درج کریں جو بکنگ کے وقت استعمال کی گئی تھی۔
             </p>
             <form onSubmit={searchOrderToEdit}>
-              <label style={{ display: "block", fontSize: 12, color: "#666", fontWeight: 600, marginBottom: 4 }}>Town</label>
+              <label style={{ display: "block", fontSize: 12, color: "#666", fontWeight: 600, marginBottom: 4, ...urduFont, textAlign: "right" }}>ٹاؤن</label>
               <div ref={editTownBoxRef} style={{ position: "relative", marginBottom: 12 }}>
                 <input
                   value={editSearchTown}
@@ -795,15 +797,15 @@ export default function BookPage() {
                   </ul>
                 )}
               </div>
-              <label style={{ display: "block", fontSize: 12, color: "#666", fontWeight: 600, marginBottom: 4 }}>Order ID</label>
+              <label style={{ display: "block", fontSize: 12, color: "#666", fontWeight: 600, marginBottom: 4, ...urduFont, textAlign: "right" }}>آرڈر آئی ڈی</label>
               <input
                 value={editSearchOrderNumber}
                 onChange={(e) => setEditSearchOrderNumber(e.target.value)}
-                placeholder="e.g. 26090001"
-                style={{ width: "100%", padding: "8px 10px", marginBottom: 14, border: "1px solid #d9dde6", borderRadius: 6, boxSizing: "border-box", fontSize: 14 }}
+                placeholder="مثال کے طور پر: 26090001"
+                style={{ width: "100%", padding: "8px 10px", marginBottom: 14, border: "1px solid #d9dde6", borderRadius: 6, boxSizing: "border-box", fontSize: 14, ...urduFont }}
               />
               {editSearchError && (
-                <div style={{ color: "#d62828", fontSize: 13, marginBottom: 12 }}>{editSearchError}</div>
+                <div style={{ color: "#d62828", fontSize: 13, marginBottom: 12, ...urduFont, textAlign: "right" }}>{editSearchError}</div>
               )}
               <div style={{ display: "flex", gap: 10 }}>
                 <button
@@ -813,16 +815,16 @@ export default function BookPage() {
                     setEditTownSuggestions([]);
                     setShowEditTownDropdown(false);
                   }}
-                  style={{ flex: 1, padding: "10px 0", background: "none", border: "1px solid #ccc", borderRadius: 8, cursor: "pointer", color: "#666", fontSize: 14 }}
+                  style={{ flex: 1, padding: "10px 0", background: "none", border: "1px solid #ccc", borderRadius: 8, cursor: "pointer", color: "#666", fontSize: 14, ...urduFont }}
                 >
-                  Cancel
+                  منسوخ کریں
                 </button>
                 <button
                   type="submit"
                   disabled={editSearchLoading}
-                  style={{ ...qtyOptionButtonStyle, flex: 1 }}
+                  style={{ ...qtyOptionButtonStyle, flex: 1, ...urduFont }}
                 >
-                  {editSearchLoading ? "Searching..." : "Search"}
+                  {editSearchLoading ? "تلاش ہو رہی ہے..." : "تلاش کریں"}
                 </button>
               </div>
             </form>
