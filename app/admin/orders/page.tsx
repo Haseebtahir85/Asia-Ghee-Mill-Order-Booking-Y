@@ -137,11 +137,10 @@ const MONTH_LABELS = ["January", "February", "March", "April", "May", "June", "J
 
 // A single control that opens a popover with quick presets (Today,
 // Yesterday, Last 3 Days, Last Week, Last Month) alongside a real
-// calendar grid. The range is picked with ONE continuous gesture —
-// press down on the start day, drag across the days you want, release
-// on the end day — rather than two separate discrete clicks. Releasing
-// applies the range and closes the popover immediately; a plain
-// press-and-release on a single day (no drag) selects just that day.
+// calendar grid. Selection is click-click: the first click sets the
+// start day (shown selected, popover stays open), the second click on
+// the same calendar sets the end day and closes the popover — it never
+// closes after just one date.
 function DateRangePicker({
   from,
   to,
@@ -154,9 +153,8 @@ function DateRangePicker({
   const [open, setOpen] = useState(false);
   const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
   const [viewMonth, setViewMonth] = useState(() => new Date().getMonth());
-  const [dragAnchor, setDragAnchor] = useState<string | null>(null);
-  const [dragEnd, setDragEnd] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
+  const [pendingStart, setPendingStart] = useState<string | null>(null);
+  const [hoverDate, setHoverDate] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -165,9 +163,8 @@ function DateRangePicker({
     const d = new Date(base + "T00:00:00");
     setViewYear(d.getFullYear());
     setViewMonth(d.getMonth());
-    setDragAnchor(null);
-    setDragEnd(null);
-    setIsDragging(false);
+    setPendingStart(null);
+    setHoverDate(null);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -178,26 +175,6 @@ function DateRangePicker({
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
-
-  // Finishing the drag anywhere on the page (not just on a day cell)
-  // still completes the selection — you don't have to release exactly
-  // on a calendar day for the gesture to register.
-  useEffect(() => {
-    if (!isDragging) return;
-    function finishDrag() {
-      if (dragAnchor) {
-        const a = dragAnchor;
-        const b = dragEnd || dragAnchor;
-        onChange(a < b ? a : b, a < b ? b : a);
-        setOpen(false);
-      }
-      setIsDragging(false);
-      setDragAnchor(null);
-      setDragEnd(null);
-    }
-    document.addEventListener("mouseup", finishDrag);
-    return () => document.removeEventListener("mouseup", finishDrag);
-  }, [isDragging, dragAnchor, dragEnd, onChange]);
 
   const activePreset = useMemo<PresetKey | null>(() => {
     for (const p of PRESETS) {
@@ -226,6 +203,8 @@ function DateRangePicker({
 
   function clearAll() {
     onChange("", "");
+    setPendingStart(null);
+    setHoverDate(null);
     setOpen(false);
   }
 
@@ -247,11 +226,36 @@ function DateRangePicker({
     }
   }
 
-  // While dragging, the preview range is whatever's between the anchor
-  // and wherever the pointer currently is — regardless of which one is
-  // chronologically earlier.
-  const previewFrom = isDragging && dragAnchor ? (dragAnchor < (dragEnd || dragAnchor) ? dragAnchor : dragEnd || dragAnchor) : from;
-  const previewTo = isDragging && dragAnchor ? (dragAnchor < (dragEnd || dragAnchor) ? dragEnd || dragAnchor : dragAnchor) : to;
+  // First click on a day: just marks it as the pending start — the
+  // popover stays open. Second click: whichever day you click becomes
+  // the other end of the range (ordered chronologically regardless of
+  // which one you clicked first), and only THEN does it close.
+  function handleDayClick(dateStr: string) {
+    if (!pendingStart) {
+      setPendingStart(dateStr);
+      setHoverDate(null);
+      return;
+    }
+    const a = pendingStart;
+    const b = dateStr;
+    onChange(a < b ? a : b, a < b ? b : a);
+    setPendingStart(null);
+    setHoverDate(null);
+    setOpen(false);
+  }
+
+  // While only the start has been clicked, hovering previews the
+  // range that would result from clicking the hovered day next.
+  const displayFrom = pendingStart
+    ? hoverDate
+      ? (pendingStart < hoverDate ? pendingStart : hoverDate)
+      : pendingStart
+    : from;
+  const displayTo = pendingStart
+    ? hoverDate
+      ? (pendingStart < hoverDate ? hoverDate : pendingStart)
+      : pendingStart
+    : to;
 
   const weeks = getMonthMatrix(viewYear, viewMonth);
   const today = todayInKarachi();
@@ -281,7 +285,6 @@ function DateRangePicker({
             padding: 12,
             display: "flex",
             gap: 14,
-            userSelect: isDragging ? "none" : undefined,
           }}
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 120, borderRight: "1px solid #f0e6bf", paddingRight: 12 }}>
@@ -326,7 +329,7 @@ function DateRangePicker({
             </div>
 
             <div style={{ fontSize: 11, color: "#888", textAlign: "center" }}>
-              Drag from the start day to the end day
+              {pendingStart ? "Now click the end day" : "Click the start day"}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
@@ -339,20 +342,16 @@ function DateRangePicker({
                 week.map((dateStr, di) => {
                   if (!dateStr) return <div key={`${wi}-${di}`} />;
 
-                  const inPreview = previewFrom && previewTo && dateStr >= previewFrom && dateStr <= previewTo;
-                  const isEndpoint = dateStr === previewFrom || dateStr === previewTo;
+                  const inPreview = displayFrom && displayTo && dateStr >= displayFrom && dateStr <= displayTo;
+                  const isEndpoint = dateStr === displayFrom || dateStr === displayTo;
                   const isToday = dateStr === today;
 
                   return (
                     <div
                       key={dateStr}
-                      onMouseDown={() => {
-                        setIsDragging(true);
-                        setDragAnchor(dateStr);
-                        setDragEnd(dateStr);
-                      }}
+                      onClick={() => handleDayClick(dateStr)}
                       onMouseEnter={() => {
-                        if (isDragging) setDragEnd(dateStr);
+                        if (pendingStart) setHoverDate(dateStr);
                       }}
                       style={{
                         textAlign: "center",
