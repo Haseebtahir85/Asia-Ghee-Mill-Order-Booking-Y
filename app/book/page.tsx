@@ -22,6 +22,11 @@ const MAX_GRAND_TOTAL_TON = 10.05;
 const WEIGHT_LIMIT_MESSAGE =
   "کل وزن 10 ٹن سے زیادہ نہیں ہو سکتا۔ براہ کرم اپنے وزن کو کم کریں اور دوبارہ کوشش کریں۔";
 
+// Shown under the Town field while an existing order is open for editing:
+// the town is fixed to whatever the order was booked with, and only the
+// item quantities can be changed.
+const TOWN_LOCKED_MESSAGE = "ترمیم کے دوران ٹاؤن تبدیل نہیں کیا جا سکتا۔";
+
 // True if the string contains Urdu/Arabic-script characters, so we only
 // apply the Urdu font to messages that are actually in Urdu.
 function isUrduText(text: string): boolean {
@@ -138,10 +143,13 @@ export default function BookPage() {
 
   // "Edit Order" — a customer can look up an order they already placed by
   // Town + Order ID (acting as a lightweight shared credential) and edit
-  // its quantities/town. editingOrder holds the town/order_number pair
+  // its quantities. editingOrder holds the town/order_number pair
   // that was used to find it, since the update endpoint re-checks both
   // again server-side before allowing any change — the order's own id is
   // never treated as sufficient authorization by itself.
+  //
+  // While editingOrder is set, the Town field is locked: the order stays
+  // on the town it was booked with, and only quantities can change.
   const [showEditSearch, setShowEditSearch] = useState(false);
   const [editSearchTown, setEditSearchTown] = useState("");
   const [editSearchOrderNumber, setEditSearchOrderNumber] = useState("");
@@ -155,6 +163,8 @@ export default function BookPage() {
 
   // Read-only Pakistan Standard Time clock (not derived from the device's local time zone)
   const [pkTime, setPkTime] = useState(getPakistanTimeString());
+
+  const townLocked = !!editingOrder;
 
   useEffect(() => {
     const interval = setInterval(() => setPkTime(getPakistanTimeString()), 1000);
@@ -273,6 +283,9 @@ export default function BookPage() {
   }
 
   function handleTownInputChange(value: string) {
+    // Locked while editing an existing order — the town is fixed.
+    if (townLocked) return;
+
     setTownQuery(value);
     setTownId("");
     if (!value.trim()) {
@@ -286,6 +299,7 @@ export default function BookPage() {
   }
 
   function selectTown(t: Town) {
+    if (townLocked) return;
     setTownQuery(townLabel(t));
     setTownId(t.id);
     setShowTownDropdown(false);
@@ -391,6 +405,8 @@ export default function BookPage() {
   // Updating an existing order — re-sends the same order_number + town
   // pair used to find it in the first place, since the server treats
   // that pair as the actual authorization, not the order's id alone.
+  // town_id is sent unchanged (the field is locked in edit mode), so
+  // only the quantities can differ from what was originally booked.
   async function submitEditOrder(lines: { item_id: string; qty: number }[]) {
     if (!editingOrder) return;
     setError(null);
@@ -424,7 +440,8 @@ export default function BookPage() {
   }
 
   // Looks an order up by Town + Order ID and, if found, loads it into
-  // the booking form for editing (town, and every item's quantity).
+  // the booking form for editing. The town comes back locked; only the
+  // item quantities stay editable.
   async function searchOrderToEdit(e: React.FormEvent) {
     e.preventDefault();
     setEditSearchError(null);
@@ -453,8 +470,21 @@ export default function BookPage() {
 
       const order = json.order;
       setEditingOrder({ id: order.id, order_number: order.order_number, town: order.town });
-      setTownId(order.town_id ?? "");
-      setTownQuery(order.town ?? "");
+
+      // If the lookup response carries no town_id, fall back to matching the
+      // order's stored town name against the loaded towns list — otherwise
+      // townId stays empty and submitting would fail the "pick a town" check
+      // on a field the user can no longer edit.
+      const matchedTown =
+        towns.find((t) => t.id === order.town_id) ??
+        towns.find(
+          (t) => t.name.trim().toLowerCase() === String(order.town ?? "").trim().toLowerCase()
+        );
+
+      setTownId(order.town_id ?? matchedTown?.id ?? "");
+      setTownQuery(matchedTown ? townLabel(matchedTown) : order.town ?? "");
+      setTownSuggestions([]);
+      setShowTownDropdown(false);
 
       const newQtys: Record<string, string> = {};
       for (const line of order.order_items ?? []) {
@@ -479,6 +509,8 @@ export default function BookPage() {
     setQtys({});
     setTownId("");
     setTownQuery("");
+    setTownSuggestions([]);
+    setShowTownDropdown(false);
     setError(null);
   }
 
@@ -515,6 +547,8 @@ export default function BookPage() {
               setQtys({});
               setTownId("");
               setTownQuery("");
+              setTownSuggestions([]);
+              setShowTownDropdown(false);
             }}
           >
             Book another order
@@ -580,14 +614,25 @@ export default function BookPage() {
               <div style={{ position: "relative" }}>
                 <input
                   className={styles.select}
-                  style={{ width: "100%", ...urduFont }}
+                  style={{
+                    width: "100%",
+                    ...urduFont,
+                    ...(townLocked
+                      ? { background: "#f1f3f7", color: "#555", cursor: "not-allowed" }
+                      : null),
+                  }}
                   placeholder="ٹاؤن تلاش کرنے کے لیے ٹائپ کریں..."
                   value={townQuery}
                   onChange={(e) => handleTownInputChange(e.target.value)}
-                  onFocus={() => townSuggestions.length > 0 && setShowTownDropdown(true)}
+                  onFocus={() => {
+                    if (townLocked) return;
+                    if (townSuggestions.length > 0) setShowTownDropdown(true);
+                  }}
+                  readOnly={townLocked}
+                  aria-readonly={townLocked}
                   autoComplete="off"
                 />
-                {showTownDropdown && townSuggestions.length > 0 && (
+                {!townLocked && showTownDropdown && townSuggestions.length > 0 && (
                   <ul style={dropdownStyle}>
                     {townSuggestions.map((t) => (
                       <li key={t.id} onClick={() => selectTown(t)} style={dropdownItemStyle}>
@@ -597,6 +642,11 @@ export default function BookPage() {
                   </ul>
                 )}
               </div>
+              {townLocked && (
+                <div style={{ fontSize: 11, color: "#888", marginTop: 4, ...urduFont, textAlign: "right" }}>
+                  {TOWN_LOCKED_MESSAGE}
+                </div>
+              )}
             </div>
           </div>
         </div>
