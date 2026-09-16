@@ -397,15 +397,16 @@ export function buildOrderBookPdf(
 
       if (draw) {
         // Grid lines — every row and every column boundary, like a
-        // real table, not just plain text. 0.75pt and a mid grey (not
-        // a near-white hairline), with every coordinate snapped to a
-        // 0.5pt grid — thin strokes at fractional y-positions get
-        // antialiased across two device rows and can effectively drop
-        // out on some printers even though they render fine on screen
-        // or in a PDF viewer. Snapping keeps every stroke a single,
-        // solidly-inked line.
+        // real table, not just plain text. Darkened to #555 and
+        // widened to 1pt: the previous #999 (60% gray) at 0.75pt was
+        // still light enough for some renderers/print engines to
+        // threshold it away entirely, especially once ROW_H shrinks
+        // for orders with a long item list. Every coordinate stays
+        // snapped to a 0.5pt grid — fractional y-positions on thin
+        // strokes get antialiased across two device rows and can drop
+        // out even at a darker color/heavier width.
         doc.save();
-        doc.strokeColor("#999999").lineWidth(0.75);
+        doc.strokeColor("#555555").lineWidth(1);
         for (let r = 0; r <= catalogItems.length; r++) {
           const ly = snap(itemsTop + r * ROW_H);
           doc.moveTo(snap(x), ly).lineTo(snap(x + width), ly).stroke();
