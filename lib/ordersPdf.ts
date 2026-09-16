@@ -1,6 +1,37 @@
 // Destination: lib/ordersPdf.ts
 import PDFDocument from "pdfkit";
 
+// Builds the "Order Book" PDF: two SEPARATE, self-contained tables per
+// order (a bill/customer table and a "Provisional Order" dispatch
+// table), each with its own complete header and its own DISTINCT
+// summary section written as a plain label/value list — the two
+// tables show different totals, not duplicates of each other:
+//
+//   Bill table summary: Weight (Ton), Amount, then the full six-line
+//     breakdown — Weight (Ghee), Weight (Oil), Total Weight (Ton),
+//     Weight (RSO), Weight (SOAP), G.Total Weight (Ton).
+//   Provisional Order table summary: Weight (Ghee) / Weight (Oil) /
+//     RSO / Total (Total = Ghee + Oil + RSO).
+//
+// FIXED at exactly 2 orders (4 tables) per A4 portrait page. Column
+// widths scale to fill the page width exactly, and every row/font size
+// scales UP from a compact base so the fixed 2-per-page budget is used
+// productively (bigger, more legible text) rather than left as blank
+// space. Dashed guide lines mark where the printed sheet should be
+// cut, since each table becomes a separate physical slip.
+//
+// Print-safety notes:
+//  - Item-grid lines are drawn at 0.5pt / #999 rather than a lighter
+//    hairline — very thin, very light strokes can drop out entirely
+//    on some printers even though they show fine on screen or in a
+//    PDF viewer.
+//  - Item text is padded and vertically centered within each row cell
+//    so it never sits flush against a grid line.
+//  - The two rows on a page are positioned using a real MEASURED row
+//    height (see "measurement pass" below), not just the approximate
+//    proportional model used to pick font sizes — this keeps the
+//    blank space above the first row and below the second row equal,
+//    instead of the content silently overflowing the bottom margin.
 function weightCategory(name: string, type: string): "ghee" | "oil" | "rso" | "soap" | "other" {
   const n = name.toLowerCase();
   if (n.includes("rso")) return "rso";
