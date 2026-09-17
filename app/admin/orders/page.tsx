@@ -398,14 +398,14 @@ export default function AdminOrdersPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetched once — every filter after that is instant, applied client-side
-  // against this same list, with no network round-trip per change.
+  // Refetches just the orders list — used after actions that change it
+  // (status update, export-new, delete) — without touching the marker
+  // or the page-level loading flag, so it never re-shows the loading
+  // skeleton for a routine refresh.
   async function loadOrders() {
-    setLoading(true);
     const res = await fetch("/api/admin/orders");
     const json = await res.json();
     setAllOrders(json.orders ?? []);
-    setLoading(false);
   }
 
   // Reads the "New Order" marker (admin_settings.last_order_export_at)
@@ -423,9 +423,17 @@ export default function AdminOrdersPage() {
     }
   }
 
+  // Initial load fetches orders AND the marker together and only then
+  // clears the loading flag. Waiting on both before the first render
+  // means the New Orders tab shows its correct, already-filtered list
+  // right away — never a flash of every order before it narrows down.
   useEffect(() => {
-    loadOrders();
-    loadMarker();
+    async function init() {
+      setLoading(true);
+      await Promise.all([loadOrders(), loadMarker()]);
+      setLoading(false);
+    }
+    init();
   }, []);
 
   // Town filter options come straight from the orders actually loaded —
@@ -625,14 +633,14 @@ export default function AdminOrdersPage() {
     setDeletingId(null);
   }
 
+  // Bulk delete now only ever acts on a checked selection — the button
+  // itself is only rendered once selected.size > 0 (see the button
+  // markup below), so there's no "delete everything filtered" fallback
+  // to guard against here anymore.
   async function deleteBulk() {
-    const ids = selected.size > 0 ? Array.from(selected) : filteredOrders.map((o) => o.id);
+    const ids = Array.from(selected);
     if (ids.length === 0) return;
-    const ok = window.confirm(
-      selected.size > 0
-        ? `Delete ${ids.length} selected order(s)? This cannot be undone.`
-        : `Delete all ${ids.length} filtered order(s)? This cannot be undone.`
-    );
+    const ok = window.confirm(`Delete ${ids.length} selected order(s)? This cannot be undone.`);
     if (!ok) return;
     setDeleting(true);
     await deleteOrders(ids);
@@ -706,18 +714,11 @@ export default function AdminOrdersPage() {
               {exporting ? "Exporting..." : selected.size > 0 ? `Export Selected (${selected.size})` : "Export All (filtered)"}
             </button>
           )}
-          <button
-            type="button"
-            onClick={deleteBulk}
-            disabled={deleting || filteredOrders.length === 0}
-            style={deleteButtonStyle}
-          >
-            {deleting
-              ? "Deleting..."
-              : selected.size > 0
-              ? `Delete Selected (${selected.size})`
-              : "Delete All (filtered)"}
-          </button>
+          {selected.size > 0 && (
+            <button type="button" onClick={deleteBulk} disabled={deleting} style={deleteButtonStyle}>
+              {deleting ? "Deleting..." : `Delete Selected (${selected.size})`}
+            </button>
+          )}
         </div>
       </div>
 
