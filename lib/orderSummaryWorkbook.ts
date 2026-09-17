@@ -58,6 +58,8 @@ function categorizePivotItem(item: { type?: string | null; item_number?: string 
 }
 
 const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9EAD3" } };
+const GROUP_BORDER: ExcelJS.Border = { style: "medium" };
+const HEADER_UNDERLINE: ExcelJS.Border = { style: "medium" };
 
 export function buildOrderSummaryWorkbook(orders: any[], catalogItems: any[]): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
@@ -67,7 +69,11 @@ export function buildOrderSummaryWorkbook(orders: any[], catalogItems: any[]): E
   const sheet = workbook.addWorksheet("Summary");
 
   // Group the live catalog into display categories, each list ordered
-  // by the item's own sort_order.
+  // by the item's own sort_order. Every item in the catalog gets a
+  // column here regardless of whether any order in this export used
+  // it — columns come from the catalog, not from which items happen
+  // to have data, so a column is never dropped just because it's
+  // empty for this particular batch.
   const itemsByCategory = new Map<PivotCategory, any[]>();
   for (const item of catalogItems) {
     const cat = categorizePivotItem(item);
@@ -79,11 +85,18 @@ export function buildOrderSummaryWorkbook(orders: any[], catalogItems: any[]): E
   }
 
   let col = 1;
+  // Left edge of every distinct block (Sr., Town, each category group,
+  // and each fixed weight column) — used after the sheet is built to
+  // draw ONE clean vertical line at each block boundary, and nowhere
+  // else, so items within the same category never look separated from
+  // each other.
+  const blockStartCols: number[] = [];
 
   // Adds a column that spans BOTH header rows (Sr., Town, and every
   // weight/summary column at the end) since those don't belong under
   // an item-category group.
   function addFixedColumn(label: string, width: number): number {
+    blockStartCols.push(col);
     sheet.getColumn(col).width = width;
     sheet.mergeCells(1, col, 2, col);
     const cell = sheet.getCell(1, col);
@@ -107,12 +120,14 @@ export function buildOrderSummaryWorkbook(orders: any[], catalogItems: any[]): E
     if (!items || items.length === 0) continue;
 
     const startCol = col;
+    blockStartCols.push(startCol);
     for (const item of items) {
       sheet.getColumn(col).width = 9;
       const cell = sheet.getCell(2, col);
       cell.value = item.name;
       cell.font = { bold: true, size: 9 };
       cell.alignment = { vertical: "middle", horizontal: "center", textRotation: 90, wrapText: true };
+      cell.fill = HEADER_FILL;
       itemColumn.set(item.id, col);
       col++;
     }
@@ -130,6 +145,7 @@ export function buildOrderSummaryWorkbook(orders: any[], catalogItems: any[]): E
   const weightOilCol = addFixedColumn("Weight Oil", 11);
   const rsoWeightCol = addFixedColumn("RSO", 9);
   const totalCol = addFixedColumn("Total Oil, Ghee & RSO", 14);
+  const lastCol = totalCol;
 
   sheet.getRow(1).height = 22;
   sheet.getRow(2).height = 65;
@@ -179,6 +195,37 @@ export function buildOrderSummaryWorkbook(orders: any[], catalogItems: any[]): E
 
     rowIdx++;
   });
+
+  const lastRow = rowIdx - 1;
+
+  // Draw the header/group borders LAST, once every column and row is
+  // known. Only two things get a line: a vertical rule at the LEFT
+  // edge of each block (Sr., Town, each category group, each weight
+  // column) running the full height of the sheet, and a horizontal
+  // rule under row 2 separating the header from the data. Nothing
+  // else gets a border, so items within the same category never look
+  // separated from each other — only the block boundaries do, same as
+  // the reference sheet.
+  if (lastRow >= 2) {
+    for (const startCol of blockStartCols) {
+      for (let r = 1; r <= lastRow; r++) {
+        const cell = sheet.getCell(r, startCol);
+        cell.border = { ...cell.border, left: GROUP_BORDER };
+      }
+    }
+    // Close the right edge of the table too.
+    for (let r = 1; r <= lastRow; r++) {
+      const cell = sheet.getCell(r, lastCol);
+      cell.border = { ...cell.border, right: GROUP_BORDER };
+    }
+    // Underline the whole header row so it reads as a header, and cap
+    // the top and bottom of the table.
+    for (let c = 1; c <= lastCol; c++) {
+      sheet.getCell(1, c).border = { ...sheet.getCell(1, c).border, top: GROUP_BORDER };
+      sheet.getCell(2, c).border = { ...sheet.getCell(2, c).border, bottom: HEADER_UNDERLINE };
+      sheet.getCell(lastRow, c).border = { ...sheet.getCell(lastRow, c).border, bottom: GROUP_BORDER };
+    }
+  }
 
   sheet.pageSetup = {
     paperSize: 9, // A4
