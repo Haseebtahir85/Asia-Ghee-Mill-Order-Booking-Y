@@ -58,8 +58,8 @@ function categorizePivotItem(item: { type?: string | null; item_number?: string 
 }
 
 const HEADER_FILL: ExcelJS.Fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9EAD3" } };
-const GROUP_BORDER: ExcelJS.Border = { style: "medium" };
-const HEADER_UNDERLINE: ExcelJS.Border = { style: "medium" };
+const GROUP_BORDER: ExcelJS.Border = { style: "medium", color: { argb: "FF000000" } };
+const HEADER_UNDERLINE: ExcelJS.Border = { style: "medium", color: { argb: "FF000000" } };
 
 export function buildOrderSummaryWorkbook(orders: any[], catalogItems: any[]): ExcelJS.Workbook {
   const workbook = new ExcelJS.Workbook();
