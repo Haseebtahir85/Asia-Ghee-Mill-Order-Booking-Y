@@ -63,6 +63,61 @@ function getPakistanTimeString() {
   return `${timePart}, ${datePart}`;
 }
 
+// Booking is only open 09:00–18:00 Pakistan Standard Time (a fixed UTC+5
+// offset — Pakistan does not observe DST). This is checked against time
+// fetched from an online time API (see fetchOnlineTimeOffsetMs below), not
+// the device's own clock, so changing the device's date/time can't be used
+// to open the form outside these hours.
+const OPEN_HOUR_PKT = 9;
+const CLOSE_HOUR_PKT = 18;
+const ONLINE_TIME_API_URL = "https://worldtimeapi.org/api/timezone/Asia/Karachi";
+
+// Breaks a UTC timestamp (ms) into its Pakistan-local calendar/clock parts.
+function getPakistanParts(ms: number) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Karachi",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(ms));
+  const map: Record<string, string> = {};
+  for (const p of parts) map[p.type] = p.value;
+  return {
+    year: parseInt(map.year, 10),
+    month: parseInt(map.month, 10),
+    day: parseInt(map.day, 10),
+    // hour12:false can render midnight as "24" in some environments
+    hour: parseInt(map.hour, 10) % 24,
+    minute: parseInt(map.minute, 10),
+  };
+}
+
+function isWithinBookingHours(ms: number): boolean {
+  const { hour } = getPakistanParts(ms);
+  return hour >= OPEN_HOUR_PKT && hour < CLOSE_HOUR_PKT;
+}
+
+// The next 09:00 PKT instant at/after `ms`, as a UTC timestamp (ms).
+function getNextOpenTimeMs(ms: number): number {
+  const { year, month, day, hour } = getPakistanParts(ms);
+  const targetDay = hour < OPEN_HOUR_PKT ? day : day + 1;
+  // 09:00 PKT == 04:00 UTC (PKT is always UTC+5). Date.UTC normalizes a
+  // day value that overflows past the end of the month automatically.
+  return Date.UTC(year, month - 1, targetDay, OPEN_HOUR_PKT - 5, 0, 0);
+}
+
+// mm:ss-free HH:MM countdown, rounded up so it doesn't read 00:00 while
+// there's still time left.
+function formatRemaining(ms: number): string {
+  const totalMinutes = Math.max(0, Math.ceil(ms / 60000));
+  const hh = Math.floor(totalMinutes / 60);
+  const mm = totalMinutes % 60;
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
 // Icon is the admin's explicit choice (item.icon) when one is set.
 // Otherwise it's guessed from what the item is called — a plain
 // substring check, so it doesn't matter what comes before the
@@ -174,6 +229,74 @@ export default function BookPage() {
     const interval = setInterval(() => setPkTime(getPakistanTimeString()), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  // Online-calibrated clock for the 9am–6pm booking-hours gate.
+  // pkClockOffsetMs is (online server time − device time), fetched once on
+  // load; every later "now" used for the gate is Date.now() + offset, so
+  // the check tracks real time even if the device's own clock is wrong or
+  // has been changed. Falls back to the device clock (offset 0) only if
+  // the online time source can't be reached, so the page doesn't get stuck.
+  const [pkClockOffsetMs, setPkClockOffsetMs] = useState(0);
+  const [pkClockReady, setPkClockReady] = useState(false);
+  const [nowCorrectedMs, setNowCorrectedMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchOnlineTime() {
+      try {
+        const res = await fetch(ONLINE_TIME_API_URL, { cache: "no-store" });
+        if (!res.ok) throw new Error("online time request failed");
+        const json = await res.json();
+        const serverMs = Number(json.unixtime) * 1000;
+        if (!Number.isFinite(serverMs)) throw new Error("bad online time response");
+        if (!cancelled) {
+          setPkClockOffsetMs(serverMs - Date.now());
+          setPkClockReady(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setPkClockOffsetMs(0);
+          setPkClockReady(true);
+        }
+      }
+    }
+    fetchOnlineTime();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pkClockReady) return;
+    function tick() {
+      setNowCorrectedMs(Date.now() + pkClockOffsetMs);
+    }
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [pkClockReady, pkClockOffsetMs]);
+
+  const bookingClosedByTime = nowCorrectedMs !== null && !isWithinBookingHours(nowCorrectedMs);
+
+  // Test hook: visiting the page with ?forceClosed=1&key=<TEST_OVERRIDE_KEY>
+  // shows the popup on demand. This isn't gated behind NODE_ENV because
+  // GitHub + Vercel builds always run in production mode (`next build`
+  // sets NODE_ENV=production for both Preview and Production deployments),
+  // so there's no separate "dev" environment to hide it behind. It's safe
+  // to leave in: it can only force the CLOSED popup to appear — it can
+  // never force the form open outside real booking hours — so guessing the
+  // key at worst shows a visitor the same popup they'd see anyway once
+  // hours actually change. Change TEST_OVERRIDE_KEY to your own private
+  // value, or delete this block once you're done testing.
+  const TEST_OVERRIDE_KEY = "asia2026test";
+  const forceClosedForTesting =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("forceClosed") === "1" &&
+    new URLSearchParams(window.location.search).get("key") === TEST_OVERRIDE_KEY;
+
+  const bookingClosed = bookingClosedByTime || forceClosedForTesting;
+  const closedRemainingLabel =
+    nowCorrectedMs !== null ? formatRemaining(getNextOpenTimeMs(nowCorrectedMs) - nowCorrectedMs) : "00:00";
 
   useEffect(() => {
     async function load() {
@@ -616,6 +739,7 @@ export default function BookPage() {
           </button>
         </div>
       </main>
+      {bookingClosed && <BookingClosedOverlay remainingLabel={closedRemainingLabel} />}
       </div>
     );
   }
@@ -1010,6 +1134,52 @@ export default function BookPage() {
         </div>
       )}
     </main>
+    {bookingClosed && <BookingClosedOverlay remainingLabel={closedRemainingLabel} />}
+    </div>
+  );
+}
+
+// Full-screen popup shown outside 9am–6pm PKT. backdropFilter blurs the
+// booking form behind it (no need to touch the form's own styles), and it
+// has no dismiss handler — it can only go away once booking hours resume.
+function BookingClosedOverlay({ remainingLabel }: { remainingLabel: string }) {
+  return (
+    <div style={closedOverlayStyle}>
+      <div style={closedModalStyle}>
+        <p style={{ ...urduFont, fontSize: 16, color: "#0b2b5b", textAlign: "center", lineHeight: 2, margin: "0 0 20px" }}>
+          بکنگ کرنے کا وقت صبح 9 بجے سے شام 6 بجے تک ہے۔
+          <br />
+          براہ مہربانی{" "}
+          <span style={{ color: "#d62828", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+            {remainingLabel}
+          </span>{" "}
+          کے بعد کوشش کریں۔
+        </p>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, paddingTop: 16, borderTop: "1px solid #e6e9ef" }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/sh-automate-logo.png"
+            alt="SH Automate"
+            style={{ width: 56, height: "auto", flexShrink: 0, opacity: 0.9 }}
+          />
+          <div style={{ textAlign: "left", fontSize: 11, color: "#888", lineHeight: 1.6 }}>
+            <div>All Rights Reserved</div>
+            <div style={{ fontWeight: 600, color: "#555" }}>SH Automation</div>
+            <div>
+              Mail:{" "}
+              <a href="mailto:Haseebchaudhary8558@gmail.com" style={{ color: "#888" }}>
+                Haseebchaudhary8558@gmail.com
+              </a>
+            </div>
+            <div>
+              Contact:{" "}
+              <a href="tel:+923049657700" style={{ color: "#888" }}>
+                +92 304 9657700
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1157,6 +1327,28 @@ const editOrderButtonStyle: React.CSSProperties = {
   background: "#fff",
   borderRadius: 20,
   cursor: "pointer",
+};
+
+const closedOverlayStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(11, 43, 91, 0.28)",
+  backdropFilter: "blur(10px)",
+  WebkitBackdropFilter: "blur(10px)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 9999,
+  padding: 16,
+};
+
+const closedModalStyle: React.CSSProperties = {
+  background: "#fff",
+  borderRadius: 14,
+  padding: "28px 22px",
+  width: "100%",
+  maxWidth: 380,
+  boxShadow: "0 14px 36px rgba(0,0,0,0.28)",
 };
 
 const modalOverlayStyle: React.CSSProperties = {

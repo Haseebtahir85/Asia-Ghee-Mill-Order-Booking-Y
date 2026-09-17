@@ -562,7 +562,7 @@ export default function AdminOrdersPage() {
     setExportingSummary(true);
     setError(null);
 
-    const res = await fetch("/api/admin/orders/export", {
+    const res = await fetch("/api/admin/orders/export-summary", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids }),
