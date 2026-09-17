@@ -1,44 +1,6 @@
 // Destination: lib/ordersPdf.ts
 import PDFDocument from "pdfkit";
 
-// Builds the "Order Book" PDF: two SEPARATE, self-contained tables per
-// order (a bill/customer table and a "Provisional Order" dispatch
-// table), each with its own complete header and its own DISTINCT
-// summary section written as a plain label/value list — the two
-// tables show different totals, not duplicates of each other:
-//
-//   Bill table summary: Weight (Ton), Amount, then the full six-line
-//     breakdown — Weight (Ghee), Weight (Oil), Total Weight (Ton),
-//     Weight (RSO), Weight (SOAP), G.Total Weight (Ton).
-//   Provisional Order table summary: Weight (Ghee) / Weight (Oil) /
-//     RSO / Total (Total = Ghee + Oil + RSO).
-//
-// FIXED at exactly 2 orders (4 tables) per A4 portrait page. Column
-// widths scale to fill the page width exactly, and every row/font size
-// scales UP from a compact base so the fixed 2-per-page budget is used
-// productively (bigger, more legible text) rather than left as blank
-// space. Dashed guide lines mark where the printed sheet should be
-// cut, since each table becomes a separate physical slip.
-//
-// Print-safety notes:
-//  - Item-grid lines are drawn at 0.75pt / #999 and snapped to a
-//    0.5pt coordinate grid. A 0.5pt line at a non-half-point y
-//    position gets antialiased across two device rows on some raster
-//    print drivers and can effectively vanish even though it renders
-//    fine on screen or in a PDF viewer — 0.75pt + snapped coordinates
-//    keeps it a single solid printed line.
-//  - Item text is vertically centered within each row cell with a
-//    GUARANTEED minimum top/bottom pad (see itemTextYOffset below),
-//    not just "row height minus line height" — that quantity used to
-//    be able to go to zero (or effectively negative, clamped to 0)
-//    whenever the row height was tight relative to the font's real
-//    line height, which is exactly what made text sit flush against
-//    the grid line above it.
-//  - The two rows on a page are positioned using a real MEASURED row
-//    height (see "measurement pass" below), not just the approximate
-//    proportional model used to pick font sizes — this keeps the
-//    blank space above the first row and below the second row equal,
-//    instead of the content silently overflowing the bottom margin.
 function weightCategory(name: string, type: string): "ghee" | "oil" | "rso" | "soap" | "other" {
   const n = name.toLowerCase();
   if (n.includes("rso")) return "rso";
@@ -189,6 +151,11 @@ export function buildOrderBookPdf(
     // Town is bold and 2pt larger than the rest of the line; Date stays
     // normal weight/size. Both drawn as one manually-centered block so
     // they still read as a single line.
+    //
+    // Town is now drawn in solid black (#000), same dark/bold treatment
+    // as the "ASIA GHEE MILLS" company name — previously it used the
+    // lighter gray (#555) shared with the Date text. Date stays gray so
+    // it still reads as secondary info next to the bold black Town.
     function drawTownDateLine(x: number, y: number, width: number, town: string, date: string) {
       const townText = `Town: ${town}`;
       const dateText = `    Date: ${date}`;
@@ -198,7 +165,7 @@ export function buildOrderBookPdf(
       const dateWidth = doc.widthOfString(dateText);
       const startX = x + (width - (townWidth + dateWidth)) / 2;
 
-      doc.font("Helvetica-Bold").fontSize(font.townDate + 2).fillColor("#555");
+      doc.font("Helvetica-Bold").fontSize(font.townDate + 2).fillColor("#000");
       doc.text(townText, startX, y, { lineBreak: false });
       doc.font("Helvetica").fontSize(font.townDate).fillColor("#555");
       doc.text(dateText, startX + townWidth, y, { lineBreak: false });
@@ -310,14 +277,7 @@ export function buildOrderBookPdf(
           doc.text(c.label, colX[i] + CELL_PAD_X, y, { width: c.w - CELL_PAD_X * 2, align: i === 0 ? "left" : "center" });
         });
       }
-      // The column-header row uses the (smaller) panel-header height
-      // budget — matching how baseSlipContentH accounts for it above.
-      // This previously reused HEADER_LINE_H here instead, which quietly
-      // ate more vertical space per row than the sizing model assumed,
-      // pushing the second slip on the page past the bottom margin (the
-      // root cause of the uneven header/footer space, and — since a
-      // printer's own hardware margin then clips whatever falls past
-      // the page's usable area — of the missing grid lines on print).
+
       y += PANEL_HEADER_H;
 
       if (draw) {
@@ -337,21 +297,6 @@ export function buildOrderBookPdf(
       const itemsTop = y;
 
       if (draw) doc.font("Helvetica").fontSize(font.itemRow);
-      // Vertically center each item row's text within its ROW_H-tall
-      // cell. Two things were wrong before:
-      //  1) ROW_H used to be smaller than the font's real line height,
-      //     so the offset clamped to 0 (fixed by the BASE_ROW_H bump
-      //     above).
-      //  2) doc.currentLineHeight(true) includes the font's internal
-      //     line-GAP (leading) on top of ascent+descent — that's
-      //     larger than the text's actual visual (inked) height, so
-      //     using it as "lineH" overstates how much vertical space the
-      //     text needs and understates the true center offset. The
-      //     text then rendered with a visibly smaller gap above it
-      //     than below it, even though the row itself had headroom.
-      //     Using the font size directly (a close, predictable proxy
-      //     for Helvetica's cap-to-baseline+descender height at these
-      //     small sizes) gives a much closer visual center.
       const visualTextH = draw ? font.itemRow * 0.72 : 0;
       const minPad = ROW_H * 0.12;
       const itemTextYOffset = draw ? Math.max((ROW_H - visualTextH) / 2, minPad) : 0;
