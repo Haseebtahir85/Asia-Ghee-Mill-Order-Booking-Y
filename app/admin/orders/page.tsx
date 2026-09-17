@@ -387,12 +387,15 @@ export default function AdminOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "">("");
   const [townFilter, setTownFilter] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  // Date range defaults to today (Karachi time) so the page opens already
+  // scoped to today's orders — the user can widen or clear it from there.
+  const [dateFrom, setDateFrom] = useState<string>(() => todayInKarachi());
+  const [dateTo, setDateTo] = useState<string>(() => todayInKarachi());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [exportingNew, setExportingNew] = useState(false);
+  const [exportingSummary, setExportingSummary] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -536,11 +539,45 @@ export default function AdminOrdersPage() {
     downloadBase64(json.xlsx.filename, json.xlsx.base64, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   }
 
+  // Bulk export now only ever acts on a checked selection, matching
+  // deleteBulk — the button is only rendered once selected.size > 0
+  // (see the button markup below).
   async function exportBulk() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
     setExporting(true);
-    const ids = selected.size > 0 ? Array.from(selected) : filteredOrders.map((o) => o.id);
     await exportOrders(ids);
     setExporting(false);
+  }
+
+  // Summary export — driven entirely by the current filters (Status,
+  // Town, Date range), not by checkbox selection. Since the date range
+  // defaults to today, pressing this fresh downloads today's orders;
+  // whatever range the user picks afterward is what gets exported.
+  // Only the xlsx is downloaded here (no PDF) — this is the quick
+  // spreadsheet summary, not the full order-book export.
+  async function exportSummary() {
+    const ids = filteredOrders.map((o) => o.id);
+    if (ids.length === 0) return;
+    setExportingSummary(true);
+    setError(null);
+
+    const res = await fetch("/api/admin/orders/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+
+    const json = await res.json().catch(() => ({ error: "Export failed" }));
+
+    if (!res.ok) {
+      setError(json.error ?? "Export failed");
+      setExportingSummary(false);
+      return;
+    }
+
+    downloadBase64(json.xlsx.filename, json.xlsx.base64, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    setExportingSummary(false);
   }
 
   async function exportOne(order: Order) {
@@ -710,8 +747,13 @@ export default function AdminOrdersPage() {
             {exportingNew ? "Checking..." : "New Order"}
           </button>
           {activeTab === "all" && (
-            <button onClick={exportBulk} disabled={exporting || filteredOrders.length === 0} style={buttonStyle}>
-              {exporting ? "Exporting..." : selected.size > 0 ? `Export Selected (${selected.size})` : "Export All (filtered)"}
+            <button type="button" onClick={exportSummary} disabled={exportingSummary || filteredOrders.length === 0} style={summaryButtonStyle}>
+              {exportingSummary ? "Exporting..." : "Summary"}
+            </button>
+          )}
+          {activeTab === "all" && selected.size > 0 && (
+            <button onClick={exportBulk} disabled={exporting} style={buttonStyle}>
+              {exporting ? "Exporting..." : `Export Selected (${selected.size})`}
             </button>
           )}
           {selected.size > 0 && (
@@ -853,6 +895,20 @@ const secondaryButtonStyle: React.CSSProperties = {
   borderRadius: 6,
   cursor: "pointer",
   fontWeight: 600,
+  fontSize: 13,
+};
+
+// Solid yellow "Summary" button — the filter-driven quick xlsx export,
+// visually distinct from the navy Export/Delete actions since it acts
+// on the current filters rather than a checkbox selection.
+const summaryButtonStyle: React.CSSProperties = {
+  padding: "8px 16px",
+  background: YELLOW,
+  color: NAVY,
+  border: "none",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontWeight: 700,
   fontSize: 13,
 };
 
