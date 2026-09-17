@@ -109,13 +109,11 @@ function getNextOpenTimeMs(ms: number): number {
   return Date.UTC(year, month - 1, targetDay, OPEN_HOUR_PKT - 5, 0, 0);
 }
 
-// mm:ss-free HH:MM countdown, rounded up so it doesn't read 00:00 while
-// there's still time left.
-function formatRemaining(ms: number): string {
+// Splits a remaining-ms countdown into whole hours + minutes, rounded up
+// so it doesn't read "0 گھنٹے 0 منٹ" while there's still time left.
+function getRemainingHoursMinutes(ms: number): { hours: number; minutes: number } {
   const totalMinutes = Math.max(0, Math.ceil(ms / 60000));
-  const hh = Math.floor(totalMinutes / 60);
-  const mm = totalMinutes % 60;
-  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  return { hours: Math.floor(totalMinutes / 60), minutes: totalMinutes % 60 };
 }
 
 // Icon is the admin's explicit choice (item.icon) when one is set.
@@ -295,8 +293,8 @@ export default function BookPage() {
     new URLSearchParams(window.location.search).get("key") === TEST_OVERRIDE_KEY;
 
   const bookingClosed = bookingClosedByTime || forceClosedForTesting;
-  const closedRemainingLabel =
-    nowCorrectedMs !== null ? formatRemaining(getNextOpenTimeMs(nowCorrectedMs) - nowCorrectedMs) : "00:00";
+  const closedRemainingMs =
+    nowCorrectedMs !== null ? Math.max(0, getNextOpenTimeMs(nowCorrectedMs) - nowCorrectedMs) : 0;
 
   useEffect(() => {
     async function load() {
@@ -739,7 +737,7 @@ export default function BookPage() {
           </button>
         </div>
       </main>
-      {bookingClosed && <BookingClosedOverlay remainingLabel={closedRemainingLabel} />}
+      {bookingClosed && <BookingClosedOverlay remainingMs={closedRemainingMs} />}
       </div>
     );
   }
@@ -1134,7 +1132,7 @@ export default function BookPage() {
         </div>
       )}
     </main>
-    {bookingClosed && <BookingClosedOverlay remainingLabel={closedRemainingLabel} />}
+    {bookingClosed && <BookingClosedOverlay remainingMs={closedRemainingMs} />}
     </div>
   );
 }
@@ -1142,18 +1140,21 @@ export default function BookPage() {
 // Full-screen popup shown outside 9am–6pm PKT. backdropFilter blurs the
 // booking form behind it (no need to touch the form's own styles), and it
 // has no dismiss handler — it can only go away once booking hours resume.
-function BookingClosedOverlay({ remainingLabel }: { remainingLabel: string }) {
+function BookingClosedOverlay({ remainingMs }: { remainingMs: number }) {
+  const { hours, minutes } = getRemainingHoursMinutes(remainingMs);
   return (
     <div style={closedOverlayStyle}>
       <div style={closedModalStyle}>
         <p style={{ ...urduFont, fontSize: 16, color: "#0b2b5b", textAlign: "center", lineHeight: 2, margin: "0 0 20px" }}>
           بکنگ کرنے کا وقت صبح 9 بجے سے شام 6 بجے تک ہے۔
           <br />
-          براہ مہربانی{" "}
+          براہ مہربانی بکنگ کرنے کے لیے{" "}
           <span style={{ color: "#d62828", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-            {remainingLabel}
+            {hours} گھنٹے {minutes} منٹ
           </span>{" "}
-          کے بعد کوشش کریں۔
+          بعد کوشش کریں۔
+          <br />
+          شکریہ
         </p>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, paddingTop: 16, borderTop: "1px solid #e6e9ef" }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
