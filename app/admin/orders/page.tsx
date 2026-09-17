@@ -20,6 +20,8 @@ const STATUS_STYLES: Record<OrderStatus, { color: string; background: string }> 
   done: { color: "#1b8a3d", background: "#e6f4ea" },
 };
 
+type OrdersTab = "new" | "all";
+
 // order_date is a plain date (no time); created_at is the full
 // timestamp — this formats that in Pakistan time, matching the clock
 // convention used elsewhere in the app.
@@ -379,7 +381,9 @@ function DateRangePicker({
 }
 
 export default function AdminOrdersPage() {
+  const [activeTab, setActiveTab] = useState<OrdersTab>("new");
   const [allOrders, setAllOrders] = useState<Order[]>([]);
+  const [lastExportAt, setLastExportAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "">("");
   const [townFilter, setTownFilter] = useState("");
@@ -404,8 +408,24 @@ export default function AdminOrdersPage() {
     setLoading(false);
   }
 
+  // Reads the "New Order" marker (admin_settings.last_order_export_at)
+  // without touching it — this is what draws the line between the New
+  // Orders tab and the All Orders tab. Read-only GET on the same route
+  // the New Order button POSTs to.
+  async function loadMarker() {
+    try {
+      const res = await fetch("/api/admin/orders/export-new");
+      const json = await res.json();
+      setLastExportAt(json.lastExportAt ?? null);
+    } catch {
+      // If this fails we just fall back to treating everything as new,
+      // which is the safe direction (nothing gets hidden).
+    }
+  }
+
   useEffect(() => {
     loadOrders();
+    loadMarker();
   }, []);
 
   // Town filter options come straight from the orders actually loaded —
@@ -421,19 +441,29 @@ export default function AdminOrdersPage() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [allOrders]);
 
+  // The New Orders tab's base list: orders created after the last time
+  // the New Order button was pressed (server-tracked marker). Until the
+  // marker exists (button never pressed), every order counts as new.
+  const newOrders = useMemo(() => {
+    if (!lastExportAt) return allOrders;
+    return allOrders.filter((o) => o.created_at > lastExportAt);
+  }, [allOrders, lastExportAt]);
+
+  const tabOrders = activeTab === "new" ? newOrders : allOrders;
+
   const filteredOrders = useMemo(() => {
-    return allOrders.filter((o) => {
+    return tabOrders.filter((o) => {
       if (statusFilter && o.status !== statusFilter) return false;
       if (townFilter && o.town_id !== townFilter) return false;
       if (dateFrom && o.order_date < dateFrom) return false;
       if (dateTo && o.order_date > dateTo) return false;
       return true;
     });
-  }, [allOrders, statusFilter, townFilter, dateFrom, dateTo]);
+  }, [tabOrders, statusFilter, townFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     setSelected(new Set());
-  }, [statusFilter, townFilter, dateFrom, dateTo]);
+  }, [activeTab, statusFilter, townFilter, dateFrom, dateTo]);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -535,7 +565,11 @@ export default function AdminOrdersPage() {
     downloadBase64(json.xlsx.filename, json.xlsx.base64, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
     setExportingNew(false);
+    // The marker just advanced server-side — reload it alongside the
+    // orders so the New Orders tab immediately drops what was just
+    // exported instead of showing it as new until the next refresh.
     loadOrders();
+    loadMarker();
   }
 
   // Shared delete call for both the single-row Delete button and the
@@ -612,6 +646,23 @@ export default function AdminOrdersPage() {
         <h1 style={{ fontSize: 22, fontWeight: 700, color: NAVY, margin: 0 }}>Orders</h1>
       </div>
 
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <button
+          type="button"
+          onClick={() => setActiveTab("new")}
+          style={activeTab === "new" ? tabButtonActiveStyle : tabButtonStyle}
+        >
+          New Orders{newOrders.length > 0 ? ` (${newOrders.length})` : ""}
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("all")}
+          style={activeTab === "all" ? tabButtonActiveStyle : tabButtonStyle}
+        >
+          All Orders
+        </button>
+      </div>
+
       <div
         style={{
           display: "flex",
@@ -650,9 +701,11 @@ export default function AdminOrdersPage() {
           <button type="button" onClick={exportNewOrders} disabled={exportingNew} style={secondaryButtonStyle}>
             {exportingNew ? "Checking..." : "New Order"}
           </button>
-          <button onClick={exportBulk} disabled={exporting || filteredOrders.length === 0} style={buttonStyle}>
-            {exporting ? "Exporting..." : selected.size > 0 ? `Export Selected (${selected.size})` : "Export All (filtered)"}
-          </button>
+          {activeTab === "all" && (
+            <button onClick={exportBulk} disabled={exporting || filteredOrders.length === 0} style={buttonStyle}>
+              {exporting ? "Exporting..." : selected.size > 0 ? `Export Selected (${selected.size})` : "Export All (filtered)"}
+            </button>
+          )}
           <button
             type="button"
             onClick={deleteBulk}
@@ -684,7 +737,7 @@ export default function AdminOrdersPage() {
         <p>Loading...</p>
       ) : filteredOrders.length === 0 ? (
         <div style={{ padding: 32, textAlign: "center", color: "#888", background: "#fff", border: `1px solid ${YELLOW}`, borderRadius: 10 }}>
-          No orders match these filters.
+          {activeTab === "new" ? "No new orders since the last export." : "No orders match these filters."}
         </div>
       ) : (
         <div style={{ overflowX: "auto", border: `1px solid ${YELLOW}`, borderRadius: 10, background: "#fff" }}>
@@ -839,6 +892,27 @@ const deleteRowButtonStyle: React.CSSProperties = {
   background: RED,
   borderRadius: 6,
   cursor: "pointer",
+};
+
+// Tab pill styles — inactive tab is an outlined navy pill on the page's
+// cream background, active tab fills solid navy with a yellow accent
+// underline so it reads as "current", matching the rest of the theme.
+const tabButtonStyle: React.CSSProperties = {
+  padding: "8px 18px",
+  background: "#fff",
+  color: NAVY,
+  border: `1px solid ${NAVY}`,
+  borderRadius: 8,
+  cursor: "pointer",
+  fontWeight: 600,
+  fontSize: 13,
+};
+
+const tabButtonActiveStyle: React.CSSProperties = {
+  ...tabButtonStyle,
+  background: NAVY,
+  color: "#fff",
+  boxShadow: `inset 0 -3px 0 ${YELLOW}`,
 };
 
 const thStyle: React.CSSProperties = { padding: "9px 6px", fontSize: 13, color: "#fff", fontWeight: 700 };

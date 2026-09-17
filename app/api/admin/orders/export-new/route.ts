@@ -1,8 +1,29 @@
-// Destination: app/api/admin/orders/export-new/route.ts
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase";
 import { buildSoftCopyWorkbook, fetchWorkbookLookups } from "@/lib/ordersWorkbook";
 import { buildOrderBookPdf } from "@/lib/ordersPdf";
+
+// GET /api/admin/orders/export-new — read-only peek at the current
+// marker, so the frontend can know the cutoff without triggering an
+// export. Used to decide which orders count as "new" for the New
+// Orders tab.
+export async function GET() {
+  try {
+    const { data: settings, error } = await supabaseServer
+      .from("admin_settings")
+      .select("last_order_export_at")
+      .eq("id", 1)
+      .maybeSingle();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ lastExportAt: settings?.last_order_export_at ?? null });
+  } catch (err: any) {
+    return NextResponse.json({ error: err?.message ?? "Failed to load marker" }, { status: 500 });
+  }
+}
 
 // POST /api/admin/orders/export-new — exports every order created since
 // the last time this endpoint ran, then advances the marker to the
