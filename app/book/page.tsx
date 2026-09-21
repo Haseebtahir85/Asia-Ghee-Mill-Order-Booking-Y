@@ -72,15 +72,17 @@ const OPEN_HOUR_PKT = 9;
 const CLOSE_HOUR_PKT = 18;
 const ONLINE_TIME_API_URL = "https://worldtimeapi.org/api/timezone/Asia/Karachi";
 
-// The online time is re-verified this often (not just once on load), so a
-// device clock changed mid-session is caught without needing a page reload.
-const ONLINE_TIME_RECHECK_INTERVAL_MS = 60 * 1000;
+// The online time is re-verified this often, continuously, for as long as
+// the page stays open — 24/7, not just once on load — so the device clock
+// is checked against the real online clock on a rolling basis, and a clock
+// changed mid-session is caught within seconds rather than needing a
+// page reload.
+const ONLINE_TIME_RECHECK_INTERVAL_MS = 20 * 1000;
 
-// How far the device's own clock is allowed to disagree with the verified
-// online time before it's treated as a deliberately changed clock (rather
-// than ordinary drift or network latency, which is normally well under a
-// minute) — see deviceTimeTampered below.
-const DEVICE_TIME_TAMPER_THRESHOLD_MS = 5 * 60 * 1000;
+// How far the device's own clock (local time) is allowed to disagree with
+// the verified online time before it's treated as a deliberately changed
+// clock — see deviceTimeTampered below.
+const DEVICE_TIME_TAMPER_THRESHOLD_MS = 10 * 60 * 1000;
 
 // Breaks a UTC timestamp (ms) into its Pakistan-local calendar/clock parts.
 function getPakistanParts(ms: number) {
