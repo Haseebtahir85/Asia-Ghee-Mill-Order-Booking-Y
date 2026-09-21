@@ -27,6 +27,14 @@ const WEIGHT_LIMIT_MESSAGE =
 // item quantities can be changed.
 const TOWN_LOCKED_MESSAGE = "ترمیم کے دوران ٹاؤن تبدیل نہیں کیا جا سکتا۔";
 
+// Shared with every device-time-tampering guard (town search, every input
+// field, the Book/Update button, the Edit Order search) as well as the
+// full-screen DeviceTimeWarningOverlay, so the wording is identical
+// everywhere it appears. "ڈیوائس" is grammatically feminine in Urdu, hence
+// "بلیک لسٹ ہو جائے گی" (not "... کر دیا جائے گا").
+const DEVICE_TIME_WARNING_MESSAGE =
+  "براہ کرم سروس استعمال کرنے کے لیے اپنی ڈیوائس (موبائل یا پی سی، جو بھی آپ استعمال کر رہے ہیں) کا وقت درست کریں، ورنہ آپ کی ڈیوائس بلیک لسٹ ہو جائے گی۔";
+
 // True if the string contains Urdu/Arabic-script characters, so we only
 // apply the Urdu font to messages that are actually in Urdu.
 function isUrduText(text: string): boolean {
@@ -452,12 +460,14 @@ export default function BookPage() {
   }, [conflictItemIds, rows]);
 
   function updateQty(itemId: string, value: string) {
+    if (deviceTimeTampered) return;
     setQtys((prev) => ({ ...prev, [itemId]: value }));
   }
 
   function handleTownInputChange(value: string) {
     // Locked while editing an existing order — the town is fixed.
     if (townLocked) return;
+    if (deviceTimeTampered) return;
 
     setTownQuery(value);
     setTownId("");
@@ -473,6 +483,7 @@ export default function BookPage() {
 
   function selectTown(t: Town) {
     if (townLocked) return;
+    if (deviceTimeTampered) return;
     setTownQuery(townLabel(t));
     setTownId(t.id);
     setShowTownDropdown(false);
@@ -482,6 +493,7 @@ export default function BookPage() {
   // Order popup — no town_id needed here, since the lookup matches
   // against the order's stored town name text, not an id.
   function handleEditSearchTownChange(value: string) {
+    if (deviceTimeTampered) return;
     setEditSearchTown(value);
     if (!value.trim()) {
       setEditTownSuggestions([]);
@@ -494,6 +506,7 @@ export default function BookPage() {
   }
 
   function selectEditSearchTown(t: Town) {
+    if (deviceTimeTampered) return;
     setEditSearchTown(townLabel(t));
     setShowEditTownDropdown(false);
   }
@@ -503,6 +516,15 @@ export default function BookPage() {
   function handleFormSubmit(e: React.FormEvent | React.MouseEvent) {
     e.preventDefault();
     setError(null);
+
+    // Belt-and-braces: the full-screen DeviceTimeWarningOverlay already
+    // blocks the whole page while the clock is tampered, but a <form>
+    // still fires its onSubmit on Enter-key inside an input even when the
+    // submit button itself is disabled — so this is checked here too.
+    if (deviceTimeTampered) {
+      setError(DEVICE_TIME_WARNING_MESSAGE);
+      return;
+    }
 
     if (!townId) {
       setError("براہ کرم ٹاؤن منتخب کریں۔");
@@ -533,6 +555,14 @@ export default function BookPage() {
   }
 
   async function bookOrders(copies: number) {
+    // Belt-and-braces: same device-time check as handleFormSubmit, in case
+    // the clock was tampered with after the qty modal was already open.
+    if (deviceTimeTampered) {
+      setShowQtyModal(false);
+      setError(DEVICE_TIME_WARNING_MESSAGE);
+      return;
+    }
+
     // Belt-and-braces: re-check the cap right before hitting the API too,
     // in case totals changed between opening the modal and confirming it.
     if (grandTotalExceedsLimit) {
@@ -582,6 +612,10 @@ export default function BookPage() {
   // only the quantities can differ from what was originally booked.
   async function submitEditOrder(lines: { item_id: string; qty: number }[]) {
     if (!editingOrder) return;
+    if (deviceTimeTampered) {
+      setError(DEVICE_TIME_WARNING_MESSAGE);
+      return;
+    }
     setError(null);
     setSubmitting(true);
 
@@ -618,6 +652,11 @@ export default function BookPage() {
   async function searchOrderToEdit(e: React.FormEvent) {
     e.preventDefault();
     setEditSearchError(null);
+
+    if (deviceTimeTampered) {
+      setEditSearchError(DEVICE_TIME_WARNING_MESSAGE);
+      return;
+    }
 
     if (!editSearchTown.trim() || !editSearchOrderNumber.trim()) {
       setEditSearchError("براہ کرم ٹاؤن اور آرڈر آئی ڈی دونوں درج کریں۔");
@@ -800,7 +839,12 @@ export default function BookPage() {
       <Header />
 
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-        <button type="button" onClick={() => setShowEditSearch(true)} style={{ ...editOrderButtonStyle, ...urduFont }}>
+        <button
+          type="button"
+          onClick={() => !deviceTimeTampered && setShowEditSearch(true)}
+          disabled={deviceTimeTampered}
+          style={{ ...editOrderButtonStyle, ...urduFont, ...(deviceTimeTampered ? { opacity: 0.5, cursor: "not-allowed" } : null) }}
+        >
           آرڈر میں تبدیلی
         </button>
       </div>
@@ -852,7 +896,7 @@ export default function BookPage() {
                   style={{
                     width: "100%",
                     ...urduFont,
-                    ...(townLocked
+                    ...(townLocked || deviceTimeTampered
                       ? { background: "#f1f3f7", color: "#555", cursor: "not-allowed" }
                       : null),
                   }}
@@ -860,14 +904,14 @@ export default function BookPage() {
                   value={townQuery}
                   onChange={(e) => handleTownInputChange(e.target.value)}
                   onFocus={() => {
-                    if (townLocked) return;
+                    if (townLocked || deviceTimeTampered) return;
                     if (townSuggestions.length > 0) setShowTownDropdown(true);
                   }}
-                  readOnly={townLocked}
-                  aria-readonly={townLocked}
+                  readOnly={townLocked || deviceTimeTampered}
+                  aria-readonly={townLocked || deviceTimeTampered}
                   autoComplete="off"
                 />
-                {!townLocked && showTownDropdown && townSuggestions.length > 0 && (
+                {!townLocked && !deviceTimeTampered && showTownDropdown && townSuggestions.length > 0 && (
                   <ul style={dropdownStyle}>
                     {townSuggestions.map((t) => (
                       <li key={t.id} onClick={() => selectTown(t)} style={dropdownItemStyle}>
@@ -945,6 +989,7 @@ export default function BookPage() {
                           step="1"
                           value={qtys[item.id] ?? ""}
                           onChange={(e) => updateQty(item.id, e.target.value)}
+                          disabled={deviceTimeTampered}
                           className={styles.qtyInput}
                           style={{
                             boxSizing: "border-box",
@@ -955,6 +1000,7 @@ export default function BookPage() {
                             margin: "0 auto",
                             textAlign: "center",
                             borderColor: hasConflict ? "#d62828" : undefined,
+                            ...(deviceTimeTampered ? { background: "#f1f3f7", cursor: "not-allowed" } : null),
                           }}
                         />
                       </td>
@@ -1015,7 +1061,7 @@ export default function BookPage() {
 
         <button
           type="submit"
-          disabled={submitting || loading || !!loadError || items.length === 0}
+          disabled={submitting || loading || !!loadError || items.length === 0 || deviceTimeTampered}
           className={styles.submitBtn}
           style={{ width: "100%", display: "block", ...urduFont }}
         >
@@ -1067,12 +1113,22 @@ export default function BookPage() {
                 <input
                   value={editSearchTown}
                   onChange={(e) => handleEditSearchTownChange(e.target.value)}
-                  onFocus={() => editTownSuggestions.length > 0 && setShowEditTownDropdown(true)}
+                  onFocus={() => !deviceTimeTampered && editTownSuggestions.length > 0 && setShowEditTownDropdown(true)}
                   placeholder="ٹاؤن تلاش کرنے کے لیے ٹائپ کریں..."
                   autoComplete="off"
-                  style={{ width: "100%", padding: "8px 10px", border: "1px solid #d9dde6", borderRadius: 6, boxSizing: "border-box", fontSize: 14, ...urduFont }}
+                  disabled={deviceTimeTampered}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    border: "1px solid #d9dde6",
+                    borderRadius: 6,
+                    boxSizing: "border-box",
+                    fontSize: 14,
+                    ...urduFont,
+                    ...(deviceTimeTampered ? { background: "#f1f3f7", cursor: "not-allowed" } : null),
+                  }}
                 />
-                {showEditTownDropdown && editTownSuggestions.length > 0 && (
+                {!deviceTimeTampered && showEditTownDropdown && editTownSuggestions.length > 0 && (
                   <ul style={dropdownStyle}>
                     {editTownSuggestions.map((t) => (
                       <li key={t.id} onClick={() => selectEditSearchTown(t)} style={dropdownItemStyle}>
@@ -1085,9 +1141,20 @@ export default function BookPage() {
               <label style={{ display: "block", fontSize: 12, color: "#666", fontWeight: 600, marginBottom: 4, ...urduFont, textAlign: "right" }}>آرڈر آئی ڈی</label>
               <input
                 value={editSearchOrderNumber}
-                onChange={(e) => setEditSearchOrderNumber(e.target.value)}
+                onChange={(e) => !deviceTimeTampered && setEditSearchOrderNumber(e.target.value)}
                 placeholder="مثال کے طور پر: 26090001"
-                style={{ width: "100%", padding: "8px 10px", marginBottom: 14, border: "1px solid #d9dde6", borderRadius: 6, boxSizing: "border-box", fontSize: 14, ...urduFont }}
+                disabled={deviceTimeTampered}
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  marginBottom: 14,
+                  border: "1px solid #d9dde6",
+                  borderRadius: 6,
+                  boxSizing: "border-box",
+                  fontSize: 14,
+                  ...urduFont,
+                  ...(deviceTimeTampered ? { background: "#f1f3f7", cursor: "not-allowed" } : null),
+                }}
               />
               {editSearchError && (
                 <div style={{ color: "#d62828", fontSize: 13, marginBottom: 12, ...urduFont, textAlign: "right" }}>{editSearchError}</div>
@@ -1106,7 +1173,7 @@ export default function BookPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={editSearchLoading}
+                  disabled={editSearchLoading || deviceTimeTampered}
                   style={{ ...qtyOptionButtonStyle, flex: 1, ...urduFont }}
                 >
                   {editSearchLoading ? "تلاش ہو رہی ہے..." : "تلاش کریں"}
@@ -1207,7 +1274,7 @@ function DeviceTimeWarningOverlay() {
           <AlertTriangleIcon />
         </div>
         <p style={{ ...urduFont, fontSize: 16, color: "#d62828", fontWeight: 700, textAlign: "center", lineHeight: 2, margin: 0 }}>
-          براہ کرم سروس استعمال کرنے کے لیے اپنی ڈیوائس (موبائل یا پی سی، جو بھی آپ استعمال کر رہے ہیں) کا وقت درست کریں، ورنہ آپ کی ڈیوائس کو بلیک لسٹ کر دیا جائے گا۔
+          {DEVICE_TIME_WARNING_MESSAGE}
           <br />
           شکریہ
         </p>
