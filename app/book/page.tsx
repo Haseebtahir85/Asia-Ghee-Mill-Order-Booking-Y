@@ -33,7 +33,7 @@ const TOWN_LOCKED_MESSAGE = "ترمیم کے دوران ٹاؤن تبدیل نہ
 // everywhere it appears. "ڈیوائس" is grammatically feminine in Urdu, hence
 // "بلیک لسٹ ہو جائے گی" (not "... کر دیا جائے گا").
 const DEVICE_TIME_WARNING_MESSAGE =
-  "براہ کرم سروس استعمال کرنے کے لیے اپنی ڈیوائس (موبائل یا پی سی، جو بھی آپ استعمال کر رہے ہیں) کا وقت درست کریں، ورنہ آپ کی ڈیوائس بلیک لسٹ ہو جائے گی۔";
+  "براہ کرم سروس استعمال کرنے کے لیے اپنی ڈیوائس  کا وقت درست کریں، ورنہ آپ کی ڈیوائس بلیک لسٹ ہو جائے گی۔";
 
 // True if the string contains Urdu/Arabic-script characters, so we only
 // apply the Urdu font to messages that are actually in Urdu.
