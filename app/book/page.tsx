@@ -65,12 +65,16 @@ function getPakistanTimeString() {
 
 // Booking is only open 09:00–18:00 Pakistan Standard Time (a fixed UTC+5
 // offset — Pakistan does not observe DST). This is checked against time
-// fetched from an online time API (see fetchOnlineTimeOffsetMs below), not
-// the device's own clock, so changing the device's date/time can't be used
-// to open the form outside these hours.
+// fetched from this app's own /api/server-time route (see the fetch effect
+// below), not the device's own clock, so changing the device's date/time
+// can't be used to open the form outside these hours. This is a same-origin
+// endpoint rather than a third-party time API (worldtimeapi.org and similar
+// public time APIs are known to go down for long stretches with no SLA) —
+// it's on the same Vercel deployment as the rest of the app, so it has no
+// separate uptime risk: if it's unreachable, the booking page itself is down.
 const OPEN_HOUR_PKT = 9;
 const CLOSE_HOUR_PKT = 18;
-const ONLINE_TIME_API_URL = "https://worldtimeapi.org/api/timezone/Asia/Karachi";
+const SERVER_TIME_API_URL = "/api/server-time";
 
 // The online time is re-verified this often, continuously, for as long as
 // the page stays open — 24/7, not just once on load — so the device clock
@@ -258,11 +262,11 @@ export default function BookPage() {
 
     async function fetchOnlineTime() {
       try {
-        const res = await fetch(ONLINE_TIME_API_URL, { cache: "no-store" });
-        if (!res.ok) throw new Error("online time request failed");
+        const res = await fetch(SERVER_TIME_API_URL, { cache: "no-store" });
+        if (!res.ok) throw new Error("server time request failed");
         const json = await res.json();
-        const serverMs = Number(json.unixtime) * 1000;
-        if (!Number.isFinite(serverMs)) throw new Error("bad online time response");
+        const serverMs = Number(json.nowMs);
+        if (!Number.isFinite(serverMs)) throw new Error("bad server time response");
         if (cancelled) return;
         hasSucceededOnce = true;
         setPkClockOffsetMs(serverMs - Date.now());
