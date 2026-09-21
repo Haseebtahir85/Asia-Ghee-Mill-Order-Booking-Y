@@ -72,6 +72,16 @@ const OPEN_HOUR_PKT = 9;
 const CLOSE_HOUR_PKT = 18;
 const ONLINE_TIME_API_URL = "https://worldtimeapi.org/api/timezone/Asia/Karachi";
 
+// The online time is re-verified this often (not just once on load), so a
+// device clock changed mid-session is caught without needing a page reload.
+const ONLINE_TIME_RECHECK_INTERVAL_MS = 60 * 1000;
+
+// How far the device's own clock is allowed to disagree with the verified
+// online time before it's treated as a deliberately changed clock (rather
+// than ordinary drift or network latency, which is normally well under a
+// minute) — see deviceTimeTampered below.
+const DEVICE_TIME_TAMPER_THRESHOLD_MS = 5 * 60 * 1000;
+
 // Breaks a UTC timestamp (ms) into its Pakistan-local calendar/clock parts.
 function getPakistanParts(ms: number) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -229,17 +239,21 @@ export default function BookPage() {
   }, []);
 
   // Online-calibrated clock for the 9am–6pm booking-hours gate.
-  // pkClockOffsetMs is (online server time − device time), fetched once on
-  // load; every later "now" used for the gate is Date.now() + offset, so
-  // the check tracks real time even if the device's own clock is wrong or
-  // has been changed. Falls back to the device clock (offset 0) only if
-  // the online time source can't be reached, so the page doesn't get stuck.
+  // pkClockOffsetMs is (online server time − device time). Every "now" used
+  // for the gate is Date.now() + offset, so the check tracks real time even
+  // if the device's own clock is wrong. pkClockSource records whether that
+  // offset actually came from the online source ("online") or is an
+  // unverified fallback used only because the API was briefly unreachable
+  // ("fallback") — the fallback never counts as evidence of tampering.
   const [pkClockOffsetMs, setPkClockOffsetMs] = useState(0);
   const [pkClockReady, setPkClockReady] = useState(false);
+  const [pkClockSource, setPkClockSource] = useState<"pending" | "online" | "fallback">("pending");
   const [nowCorrectedMs, setNowCorrectedMs] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    let hasSucceededOnce = false;
+
     async function fetchOnlineTime() {
       try {
         const res = await fetch(ONLINE_TIME_API_URL, { cache: "no-store" });
@@ -247,20 +261,40 @@ export default function BookPage() {
         const json = await res.json();
         const serverMs = Number(json.unixtime) * 1000;
         if (!Number.isFinite(serverMs)) throw new Error("bad online time response");
-        if (!cancelled) {
-          setPkClockOffsetMs(serverMs - Date.now());
-          setPkClockReady(true);
-        }
+        if (cancelled) return;
+        hasSucceededOnce = true;
+        setPkClockOffsetMs(serverMs - Date.now());
+        setPkClockSource("online");
+        setPkClockReady(true);
       } catch {
-        if (!cancelled) {
+        if (cancelled) return;
+        // Only fall back to the (unverified) device clock the first time,
+        // so the page isn't stuck forever if the API is briefly down. A
+        // failed periodic recheck just keeps the last known-good offset
+        // instead of resetting it to an unverified one.
+        if (!hasSucceededOnce) {
           setPkClockOffsetMs(0);
+          setPkClockSource("fallback");
           setPkClockReady(true);
         }
       }
     }
+
     fetchOnlineTime();
+    const interval = setInterval(fetchOnlineTime, ONLINE_TIME_RECHECK_INTERVAL_MS);
+
+    // Also re-verify the moment the tab regains focus — catches a clock
+    // change made while the device was away/asleep without waiting for
+    // the next interval tick.
+    function handleVisibility() {
+      if (document.visibilityState === "visible") fetchOnlineTime();
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+
     return () => {
       cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, []);
 
@@ -273,6 +307,14 @@ export default function BookPage() {
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [pkClockReady, pkClockOffsetMs]);
+
+  // True only once a verified online reading shows the device's own clock
+  // is off by more than the tamper threshold — i.e. someone changed their
+  // phone/PC date or time, whether before opening the page or mid-session
+  // (the periodic recheck above catches the latter). Never true off an
+  // unverified fallback reading, so a down time-API can't trigger it.
+  const deviceTimeTampered =
+    pkClockSource === "online" && Math.abs(pkClockOffsetMs) > DEVICE_TIME_TAMPER_THRESHOLD_MS;
 
   const bookingClosedByTime = nowCorrectedMs !== null && !isWithinBookingHours(nowCorrectedMs);
 
@@ -737,7 +779,11 @@ export default function BookPage() {
           </button>
         </div>
       </main>
-      {bookingClosed && <BookingClosedOverlay remainingMs={closedRemainingMs} />}
+      {deviceTimeTampered ? (
+        <DeviceTimeWarningOverlay />
+      ) : (
+        bookingClosed && <BookingClosedOverlay remainingMs={closedRemainingMs} />
+      )}
       </div>
     );
   }
@@ -1132,8 +1178,45 @@ export default function BookPage() {
         </div>
       )}
     </main>
-    {bookingClosed && <BookingClosedOverlay remainingMs={closedRemainingMs} />}
+    {deviceTimeTampered ? (
+        <DeviceTimeWarningOverlay />
+      ) : (
+        bookingClosed && <BookingClosedOverlay remainingMs={closedRemainingMs} />
+      )}
     </div>
+  );
+}
+
+// Full-screen red warning shown instead of (never alongside) the normal
+// closed-hours popup once deviceTimeTampered is true. No dismiss handler —
+// it only goes away once a verified online reading shows the device's
+// clock is back within the tamper threshold. Note: this only shows the
+// warning text the user asked for; it doesn't implement an actual device
+// blacklist.
+function DeviceTimeWarningOverlay() {
+  return (
+    <div style={closedOverlayStyle}>
+      <div style={{ ...closedModalStyle, border: "2px solid #d62828" }}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+          <AlertTriangleIcon />
+        </div>
+        <p style={{ ...urduFont, fontSize: 16, color: "#d62828", fontWeight: 700, textAlign: "center", lineHeight: 2, margin: 0 }}>
+          براہ کرم سروس استعمال کرنے کے لیے اپنی ڈیوائس (موبائل یا پی سی، جو بھی آپ استعمال کر رہے ہیں) کا وقت درست کریں، ورنہ آپ کی ڈیوائس کو بلیک لسٹ کر دیا جائے گا۔
+          <br />
+          شکریہ
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function AlertTriangleIcon() {
+  return (
+    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#d62828" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
   );
 }
 
