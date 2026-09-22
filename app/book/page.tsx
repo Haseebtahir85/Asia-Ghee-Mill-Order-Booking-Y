@@ -263,6 +263,83 @@ function OilCanolaAnimationStyles() {
         100% { transform: scale(1); opacity: 0; }
       }
 
+      /* Book button "turns to oil and flows down" when pressed */
+      @keyframes oilAnim-oilOverlayFlow {
+        0%   { clip-path: polygon(0 0,100% 0,100% 0,0 0); opacity: 0; }
+        10%  { clip-path: polygon(0 0,100% 0,100% 32%,0 32%); opacity: 1; }
+        38%  { clip-path: polygon(0 0,100% 0,100% 100%,88% 92%,80% 116%,72% 92%,64% 108%,56% 92%,48% 118%,40% 92%,32% 106%,24% 92%,16% 112%,8% 92%,0 100%); opacity: 1; }
+        72%  { clip-path: polygon(0 0,100% 0,100% 230%,88% 195%,80% 265%,72% 195%,64% 245%,56% 195%,48% 270%,40% 195%,32% 235%,24% 195%,16% 255%,8% 195%,0 225%); opacity: 1; }
+        100% { clip-path: polygon(0 0,100% 0,100% 380%,0 380%); opacity: 0; }
+      }
+      @keyframes oilAnim-btnLabelFade {
+        0%   { opacity: 1; transform: translateY(0); }
+        40%  { opacity: 0; transform: translateY(6px); }
+        100% { opacity: 0; transform: translateY(6px); }
+      }
+      .oilAnim-btnOilOverlay {
+        position: absolute;
+        inset: 0;
+        border-radius: 8px;
+        background: linear-gradient(180deg, #F6C90E 0%, #D8A400 100%);
+        clip-path: polygon(0 0,100% 0,100% 0,0 0);
+        opacity: 0;
+        pointer-events: none;
+        z-index: 2;
+      }
+      .oilAnim-bookBtnWrap.oilAnim-melting .oilAnim-btnOilOverlay {
+        animation: oilAnim-oilOverlayFlow 0.9s cubic-bezier(0.6, 0, 0.85, 0.35) forwards;
+      }
+      .oilAnim-btnRealLabel {
+        display: inline-block;
+      }
+      .oilAnim-bookBtnWrap.oilAnim-melting .oilAnim-btnRealLabel {
+        animation: oilAnim-btnLabelFade 0.5s ease forwards;
+      }
+
+      /* Qty-repeat sheet: slides up from the bottom edge, boundary looks
+         dipped in oil (wavy amber band + hanging drip tails). */
+      @keyframes oilAnim-sheetSlideUp {
+        from { transform: translateY(100%); }
+        to   { transform: translateY(0); }
+      }
+      @keyframes oilAnim-dripGrow {
+        0%   { transform: scaleY(0); opacity: 0; }
+        55%  { opacity: 1; }
+        100% { transform: scaleY(1); opacity: 1; }
+      }
+      .oilAnim-sheetOverlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(11, 43, 91, 0.35);
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        z-index: 2000;
+        padding: 0;
+      }
+      .oilAnim-qtySheet {
+        position: relative;
+        width: 100%;
+        max-width: 420px;
+        background: #fff;
+        padding: 30px 22px 22px;
+        box-shadow: 0 -12px 32px rgba(0,0,0,0.28);
+        animation: oilAnim-sheetSlideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+      .oilAnim-dripEdgeSvg {
+        position: absolute;
+        top: -22px;
+        left: 0;
+        width: 100%;
+        height: 34px;
+        display: block;
+        overflow: visible;
+      }
+      .oilAnim-dripTail {
+        transform-origin: top center;
+        animation: oilAnim-dripGrow 0.4s ease-out both;
+      }
+
       .oilAnim-pageIn {
         animation: oilAnim-pageFadeSlideUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
       }
@@ -313,7 +390,11 @@ function OilCanolaAnimationStyles() {
         .oilAnim-headerFlower,
         .oilAnim-bookBtnWrap:hover .oilAnim-dripDrop,
         .oilAnim-bookBtnWrap:hover .oilAnim-driftPetal,
-        .oilAnim-bookBtnWrap:active .oilAnim-clickRipple {
+        .oilAnim-bookBtnWrap:active .oilAnim-clickRipple,
+        .oilAnim-bookBtnWrap.oilAnim-melting .oilAnim-btnOilOverlay,
+        .oilAnim-bookBtnWrap.oilAnim-melting .oilAnim-btnRealLabel,
+        .oilAnim-qtySheet,
+        .oilAnim-dripTail {
           animation: none !important;
         }
       }
@@ -470,6 +551,41 @@ function BookButtonDecor() {
   );
 }
 
+// Rendered on top of the Book/Update button only while `melting` is true:
+// a golden overlay grows from the top of the button into a dripping,
+// flowing shape that pours downward and off the bottom of the button
+// before fading — the "button turns to oil and flows down" effect.
+// Purely visual (pointer-events: none); it plays for a fixed ~0.9s while
+// the real submit is deferred, then the qty-repeat sheet takes over.
+function BookButtonMeltOverlay() {
+  return <div className="oilAnim-btnOilOverlay" aria-hidden="true" />;
+}
+
+// The "dipped in oil" boundary used along the top edge of the qty-repeat
+// sheet: a wavy amber band with several hanging drip tails that grow in
+// just after the sheet slides up, so the sheet's edge reads as if it
+// emerged from a pool of oil rather than a plain straight border.
+function OilDripEdge() {
+  const dripX = [30, 92, 150, 210, 270, 330];
+  return (
+    <svg className="oilAnim-dripEdgeSvg" viewBox="0 0 400 40" preserveAspectRatio="none" aria-hidden="true">
+      <path
+        d="M0 20 C 20 4, 40 4, 55 20 C 68 34, 80 34, 92 18 C 104 4, 118 4, 132 20 C 146 36, 158 34, 170 16 C 182 2, 196 2, 210 18 C 224 34, 236 32, 248 16 C 260 2, 274 2, 288 18 C 300 32, 312 32, 324 16 C 336 2, 350 2, 362 18 C 374 32, 388 30, 400 18 L 400 40 L 0 40 Z"
+        fill="#D8A400"
+      />
+      {dripX.map((x, i) => (
+        <path
+          key={x}
+          className="oilAnim-dripTail"
+          style={{ animationDelay: `${0.35 + i * 0.09}s` }}
+          d={`M${x - 4} 16 Q ${x} 32, ${x} 40 Q ${x + 4} 32, ${x + 4} 16 Z`}
+          fill="#F0B90B"
+        />
+      ))}
+    </svg>
+  );
+}
+
 export default function BookPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [towns, setTowns] = useState<Town[]>([]);
@@ -489,6 +605,11 @@ export default function BookPage() {
   // a short delay so it doesn't get stuck if the user copies several.
   const [copiedOrder, setCopiedOrder] = useState<string | null>(null);
   const [showQtyModal, setShowQtyModal] = useState(false);
+  // True for the ~0.9s "turns to oil and flows down" animation played on
+  // the Book/Update button right after a valid submit is confirmed, before
+  // the qty-repeat sheet (new order) or the actual update request (editing
+  // order) proceeds. Reset back to false as soon as that next step starts.
+  const [bookBtnMelting, setBookBtnMelting] = useState(false);
   const [conflictModalNames, setConflictModalNames] = useState<string[] | null>(null);
   const conflictSignatureRef = useRef<string>("");
   const [showWeightLimitModal, setShowWeightLimitModal] = useState(false);
@@ -836,14 +957,22 @@ export default function BookPage() {
       return;
     }
 
-    if (editingOrder) {
-      submitEditOrder(lines);
-    } else {
-      setShowQtyModal(true);
-    }
+    // Play the "button turns to oil and flows down" animation first, then
+    // move to the next step once it's had time to finish (~0.9s). The
+    // button itself is disabled while bookBtnMelting is true (see the
+    // submit button's disabled prop below) so this can't be triggered twice.
+    setBookBtnMelting(true);
+    window.setTimeout(() => {
+      if (editingOrder) {
+        submitEditOrder(lines);
+      } else {
+        setShowQtyModal(true);
+      }
+    }, 900);
   }
 
   async function bookOrders(copies: number) {
+    setBookBtnMelting(false);
     // Belt-and-braces: same device-time check as handleFormSubmit, in case
     // the clock was tampered with after the qty modal was already open.
     if (deviceTimeTampered) {
@@ -900,6 +1029,7 @@ export default function BookPage() {
   // town_id is sent unchanged (the field is locked in edit mode), so
   // only the quantities can differ from what was originally booked.
   async function submitEditOrder(lines: { item_id: string; qty: number }[]) {
+    setBookBtnMelting(false);
     if (!editingOrder) return;
     if (deviceTimeTampered) {
       setError(DEVICE_TIME_WARNING_MESSAGE);
@@ -1352,20 +1482,23 @@ export default function BookPage() {
           </div>
         )}
 
-        <div className="oilAnim-bookBtnWrap">
+        <div className={`oilAnim-bookBtnWrap${bookBtnMelting ? " oilAnim-melting" : ""}`}>
           <button
             type="submit"
-            disabled={submitting || loading || !!loadError || items.length === 0 || deviceTimeTampered}
+            disabled={submitting || loading || !!loadError || items.length === 0 || deviceTimeTampered || bookBtnMelting}
             className={styles.submitBtn}
-            style={{ width: "100%", display: "block", ...urduFont }}
+            style={{ width: "100%", display: "block", position: "relative", overflow: "hidden", ...urduFont }}
           >
-            {submitting
-              ? editingOrder
-                ? "تبدیل ہو رہا ہے..."
-                : "بک ہو رہا ہے..."
-              : editingOrder
-              ? "تبدیل کریں"
-              : "ابھی بک کریں"}
+            <span className="oilAnim-btnRealLabel">
+              {submitting
+                ? editingOrder
+                  ? "تبدیل ہو رہا ہے..."
+                  : "بک ہو رہا ہے..."
+                : editingOrder
+                ? "تبدیل کریں"
+                : "ابھی بک کریں"}
+            </span>
+            {bookBtnMelting && <BookButtonMeltOverlay />}
           </button>
           <BookButtonDecor />
         </div>
@@ -1481,8 +1614,15 @@ export default function BookPage() {
       )}
 
       {showQtyModal && (
-        <div style={modalOverlayStyle} onClick={() => setShowQtyModal(false)}>
-          <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
+        <div
+          className="oilAnim-sheetOverlay"
+          onClick={() => {
+            setShowQtyModal(false);
+            setBookBtnMelting(false);
+          }}
+        >
+          <div className="oilAnim-qtySheet" onClick={(e) => e.stopPropagation()}>
+            <OilDripEdge />
             <h2 style={{ fontSize: 17, margin: "0 0 4px", color: "#0b2b5b" }}>Order Quantity</h2>
             <p style={{ fontSize: 14, color: "#666", margin: "0 0 16px", ...urduFont, textAlign: "right" }}>
               اس ایک ہی آرڈر کے لیے کتنے بل بک کیے جائیں؟
@@ -1501,7 +1641,10 @@ export default function BookPage() {
             </div>
             <button
               type="button"
-              onClick={() => setShowQtyModal(false)}
+              onClick={() => {
+                setShowQtyModal(false);
+                setBookBtnMelting(false);
+              }}
               style={{ marginTop: 16, background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: 13 }}
             >
               Cancel
