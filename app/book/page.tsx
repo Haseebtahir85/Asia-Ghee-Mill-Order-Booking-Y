@@ -199,535 +199,6 @@ function getPackFamily(item: Item): 10 | 12 | null {
 
 const QTY_OPTIONS = [1, 2, 3, 4];
 
-// ---------------------------------------------------------------------------
-// Canola / cooking-oil themed animation styles.
-//
-// Kept as one injected <style> block (rather than in book.module.css, which
-// isn't available to edit here) so every animation used below — the one-time
-// page-load intro, the header's swaying flower texture, and the Book button's
-// oil-drip / ripple / petal-drift hover effects — lives in one place. Move
-// these rules into book.module.css any time; the class/keyframe names won't
-// collide with anything already in that file since they're all prefixed
-// `oilAnim-`.
-// ---------------------------------------------------------------------------
-function OilCanolaAnimationStyles() {
-  return (
-    <style>{`
-      @keyframes oilAnim-pageFadeSlideUp {
-        from { opacity: 0; transform: translateY(18px); }
-        to   { opacity: 1; transform: translateY(0); }
-      }
-      @keyframes oilAnim-introPour {
-        0%   { stroke-dashoffset: 340; opacity: 1; }
-        70%  { stroke-dashoffset: 0; opacity: 1; }
-        100% { stroke-dashoffset: 0; opacity: 0; }
-      }
-      @keyframes oilAnim-introDrop {
-        0%   { transform: translateY(-40px); opacity: 0; }
-        35%  { opacity: 1; }
-        60%  { transform: translateY(0); opacity: 1; }
-        100% { transform: translateY(6px); opacity: 0; }
-      }
-      @keyframes oilAnim-introRipple {
-        0%   { transform: scale(0.2); opacity: 0; }
-        45%  { opacity: 0.55; }
-        100% { transform: scale(2.6); opacity: 0; }
-      }
-      @keyframes oilAnim-introBloom {
-        0%   { transform: scale(0) rotate(-25deg); opacity: 0; }
-        60%  { transform: scale(1.15) rotate(6deg); opacity: 1; }
-        100% { transform: scale(1) rotate(0deg); opacity: 1; }
-      }
-      @keyframes oilAnim-introFadeOut {
-        0%   { opacity: 1; }
-        80%  { opacity: 1; }
-        100% { opacity: 0; visibility: hidden; }
-      }
-      @keyframes oilAnim-flowerSway {
-        0%, 100% { transform: rotate(-6deg) translateY(0); }
-        50%      { transform: rotate(6deg) translateY(-1.5px); }
-      }
-      @keyframes oilAnim-petalDrift {
-        0%   { transform: translate(0, 0) rotate(0deg); opacity: 0; }
-        15%  { opacity: 0.9; }
-        100% { transform: translate(58px, -10px) rotate(140deg); opacity: 0; }
-      }
-      @keyframes oilAnim-dripFall {
-        0%   { transform: translateY(-6px) scaleY(0.7); opacity: 0; }
-        30%  { opacity: 1; }
-        75%  { transform: translateY(20px) scaleY(1); opacity: 1; }
-        100% { transform: translateY(26px) scaleY(1); opacity: 0; }
-      }
-      @keyframes oilAnim-btnRipple {
-        0%   { transform: scale(0); opacity: 0.45; }
-        100% { transform: scale(1); opacity: 0; }
-      }
-
-      /* Book button "turns to oil and flows down" — realistic version.
-         A blurred group of blobs (merged into one continuous liquid mass
-         via the #oilGooFilter SVG filter below) grows out of the button;
-         a constant central stream keeps "leaking" for the whole 3s while
-         eight individual drops peel off at staggered times and fall; a
-         glossy gradient gives it volume, a shine sweeps across twice like
-         light on wet oil, and a puddle shadow grows where it lands. */
-      .oilAnim-meltStage {
-        position: absolute;
-        inset: 0;
-        overflow: visible;
-        pointer-events: none;
-        z-index: 5;
-      }
-      .oilAnim-gooGroup {
-        position: absolute;
-        inset: 0;
-        filter: url(#oilGooFilter);
-      }
-      .oilAnim-oilSheet {
-        position: absolute;
-        inset: 0;
-        border-radius: 8px;
-        background: linear-gradient(160deg, #FCE175 0%, #F6C90E 32%, #D8A400 68%, #8A5A00 100%);
-        transform: scaleY(0);
-        transform-origin: top;
-        animation: oilAnim-sheetGrow 0.4s cubic-bezier(0.65, 0, 0.35, 1) forwards,
-                   oilAnim-liquidWobble 2.6s ease-in-out 0.4s infinite;
-      }
-      @keyframes oilAnim-sheetGrow {
-        0%   { transform: scaleY(0); opacity: 0; }
-        15%  { opacity: 1; }
-        100% { transform: scaleY(1); opacity: 1; }
-      }
-      @keyframes oilAnim-liquidWobble {
-        0%, 100% { transform: skewX(0deg); }
-        50%      { transform: skewX(-1.6deg); }
-      }
-      /* Two always-on "leak" streams at the base of the sheet, looping the
-         whole 3s so oil keeps visibly flowing rather than just a handful
-         of one-off drips. */
-      .oilAnim-stream {
-        position: absolute;
-        bottom: -4px;
-        width: 9px;
-        height: 20px;
-        border-radius: 50%;
-        background: linear-gradient(180deg, #FDE58A 0%, #F0B90B 55%, #D8A400 100%);
-        transform: translate(-50%, 0) scaleY(0.3);
-        transform-origin: top center;
-        opacity: 0;
-        animation: oilAnim-streamFlow 0.55s ease-in 0.45s infinite;
-      }
-      .oilAnim-stream-1 { left: 40%; }
-      .oilAnim-stream-2 { left: 62%; animation-delay: 0.72s; }
-      @keyframes oilAnim-streamFlow {
-        0%   { transform: translate(-50%, 0) scaleY(0.3); opacity: 0; }
-        20%  { opacity: 1; }
-        70%  { transform: translate(-50%, 46px) scaleY(2.2); opacity: 1; }
-        100% { transform: translate(-50%, 78px) scaleY(2.6); opacity: 0; }
-      }
-      .oilAnim-blob {
-        position: absolute;
-        bottom: -4px;
-        border-radius: 50%;
-        background: radial-gradient(circle at 34% 28%, #FDE58A 0%, #F0B90B 42%, #D8A400 74%, #7A4E00 100%);
-        transform: translate(-50%, 0) scale(0);
-        animation: oilAnim-blobDrip 1.3s cubic-bezier(0.55, 0, 0.85, 0.4) forwards;
-      }
-      .oilAnim-blob-1 { left: 8%;  width: 16px; height: 16px; animation-delay: 0.20s; }
-      .oilAnim-blob-2 { left: 22%; width: 22px; height: 22px; animation-delay: 0.45s; }
-      .oilAnim-blob-3 { left: 36%; width: 27px; height: 27px; animation-delay: 0.70s; }
-      .oilAnim-blob-4 { left: 50%; width: 30px; height: 30px; animation-delay: 0.95s; }
-      .oilAnim-blob-5 { left: 64%; width: 26px; height: 26px; animation-delay: 1.20s; }
-      .oilAnim-blob-6 { left: 78%; width: 23px; height: 23px; animation-delay: 1.45s; }
-      .oilAnim-blob-7 { left: 92%; width: 18px; height: 18px; animation-delay: 1.65s; }
-      .oilAnim-blob-8 { left: 15%; width: 15px; height: 15px; animation-delay: 1.85s; }
-      @keyframes oilAnim-blobDrip {
-        0%   { transform: translate(-50%, -8px) scale(0.15); opacity: 0; }
-        14%  { opacity: 1; transform: translate(-50%, 0) scale(1); }
-        55%  { transform: translate(-50%, 70px) scale(1.1, 1.7); }
-        100% { transform: translate(-50%, 190px) scale(0.55, 2.8); opacity: 0; }
-      }
-      .oilAnim-shine {
-        position: absolute;
-        inset: 0;
-        border-radius: 8px;
-        background: linear-gradient(115deg, transparent 32%, rgba(255,255,255,0.65) 48%, transparent 64%);
-        background-size: 260% 100%;
-        background-position: 140% 0;
-        mix-blend-mode: overlay;
-        opacity: 0;
-        animation: oilAnim-shineSweep 1.4s ease-in-out 0.1s 2;
-      }
-      @keyframes oilAnim-shineSweep {
-        0%   { background-position: 140% 0; opacity: 0; }
-        20%  { opacity: 0.9; }
-        65%  { background-position: -50% 0; opacity: 0.9; }
-        100% { background-position: -70% 0; opacity: 0; }
-      }
-      .oilAnim-puddle {
-        position: absolute;
-        left: 50%;
-        bottom: -20px;
-        width: 10px;
-        height: 6px;
-        border-radius: 50%;
-        background: radial-gradient(ellipse at center, rgba(138, 90, 0, 0.55) 0%, rgba(138, 90, 0, 0.18) 62%, transparent 80%);
-        filter: blur(1.5px);
-        transform: translateX(-50%) scale(0);
-        animation: oilAnim-puddleGrow 0.6s ease-out 0.5s forwards,
-                   oilAnim-puddlePulse 1.1s ease-in-out 1.1s infinite;
-      }
-      @keyframes oilAnim-puddleGrow {
-        0%   { transform: translateX(-50%) scale(0); opacity: 0; }
-        100% { transform: translateX(-50%) scale(16, 3.4); opacity: 1; }
-      }
-      @keyframes oilAnim-puddlePulse {
-        0%, 100% { transform: translateX(-50%) scale(16, 3.4); }
-        50%      { transform: translateX(-50%) scale(19, 3.8); }
-      }
-      @keyframes oilAnim-btnLabelFade {
-        0%   { opacity: 1; transform: translateY(0); }
-        35%  { opacity: 0; transform: translateY(5px); }
-        100% { opacity: 0; transform: translateY(5px); }
-      }
-      .oilAnim-btnRealLabel {
-        display: inline-block;
-      }
-      .oilAnim-bookBtnWrap.oilAnim-melting .oilAnim-btnRealLabel {
-        animation: oilAnim-btnLabelFade 0.4s ease forwards;
-      }
-
-      /* Order-Quantity popup — spawns from the bottom edge of the screen
-         and travels up to the page's vertical + horizontal center, framed
-         by the uploaded oil-splash image (its transparent middle filled
-         with a plain white panel that holds the real content). */
-      @keyframes oilAnim-modalSpawn {
-        0%   { transform: translate(-50%, 62vh) scale(0.8); opacity: 0; }
-        50%  { opacity: 1; }
-        100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
-      }
-      .oilAnim-qtyCenterOverlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(11, 43, 91, 0.35);
-        z-index: 2000;
-      }
-      .oilAnim-qtyCenterBox {
-        position: absolute;
-        left: 50%;
-        top: 50%;
-        width: min(92vw, 460px);
-        transform: translate(-50%, 62vh) scale(0.8);
-        opacity: 0;
-        animation: oilAnim-modalSpawn 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-      }
-      .oilAnim-qtyFrameWrap {
-        position: relative;
-        width: 100%;
-      }
-      .oilAnim-qtyWhiteFill {
-        position: absolute;
-        left: 9%;
-        right: 12%;
-        top: 19%;
-        bottom: 23%;
-        background: #fff;
-        border-radius: 8px;
-        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
-      }
-      .oilAnim-qtyFrameImg {
-        position: relative;
-        display: block;
-        width: 100%;
-        height: auto;
-        pointer-events: none;
-        user-select: none;
-      }
-      .oilAnim-qtyContent {
-        position: absolute;
-        left: 14%;
-        right: 17%;
-        top: 25%;
-        bottom: 29%;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-        gap: 10px;
-        overflow: auto;
-      }
-
-      .oilAnim-pageIn {
-        animation: oilAnim-pageFadeSlideUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
-      }
-
-      .oilAnim-headerTexture {
-        position: absolute;
-        inset: 0;
-        overflow: hidden;
-        pointer-events: none;
-        border-radius: inherit;
-        z-index: 0;
-      }
-      .oilAnim-headerFlower {
-        position: absolute;
-        bottom: -6px;
-        transform-origin: bottom center;
-        animation: oilAnim-flowerSway 4.5s ease-in-out infinite;
-        opacity: 0.85;
-      }
-
-      .oilAnim-bookBtnWrap {
-        position: relative;
-        isolation: isolate;
-      }
-      .oilAnim-bookBtnDecor {
-        position: absolute;
-        inset: 0;
-        overflow: visible;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity 0.25s ease;
-      }
-      .oilAnim-bookBtnWrap:hover .oilAnim-bookBtnDecor {
-        opacity: 1;
-      }
-      .oilAnim-bookBtnWrap:hover .oilAnim-dripDrop {
-        animation: oilAnim-dripFall 1.1s ease-in infinite;
-      }
-      .oilAnim-bookBtnWrap:hover .oilAnim-driftPetal {
-        animation: oilAnim-petalDrift 1.6s ease-out infinite;
-      }
-      .oilAnim-bookBtnWrap:active .oilAnim-clickRipple {
-        animation: oilAnim-btnRipple 0.55s ease-out;
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        .oilAnim-pageIn,
-        .oilAnim-headerFlower,
-        .oilAnim-bookBtnWrap:hover .oilAnim-dripDrop,
-        .oilAnim-bookBtnWrap:hover .oilAnim-driftPetal,
-        .oilAnim-bookBtnWrap:active .oilAnim-clickRipple,
-        .oilAnim-oilSheet,
-        .oilAnim-stream,
-        .oilAnim-blob,
-        .oilAnim-shine,
-        .oilAnim-puddle,
-        .oilAnim-bookBtnWrap.oilAnim-melting .oilAnim-btnRealLabel {
-          animation: none !important;
-        }
-        .oilAnim-qtyCenterBox {
-          animation: none !important;
-          transform: translate(-50%, -50%) scale(1) !important;
-          opacity: 1 !important;
-        }
-      }
-    `}</style>
-  );
-}
-
-// One-time intro shown over the page on first mount: an oil stream "pours"
-// in, lands as a droplet with a ripple, and a canola flower blooms beside
-// it — then the whole thing fades out and stops blocking clicks. Purely
-// decorative; it never gates or delays the real booking form underneath.
-function PageLoadIntro({ onDone }: { onDone: () => void }) {
-  useEffect(() => {
-    const t = setTimeout(onDone, 1500);
-    return () => clearTimeout(t);
-  }, [onDone]);
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 9998,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "rgba(255,255,255,0.92)",
-        backdropFilter: "blur(2px)",
-        WebkitBackdropFilter: "blur(2px)",
-        pointerEvents: "none",
-        animation: "oilAnim-introFadeOut 1.5s ease forwards",
-      }}
-    >
-      <svg width="180" height="160" viewBox="0 0 180 160" fill="none">
-        {/* pouring oil stream */}
-        <path
-          d="M60 6 C 66 40, 92 55, 96 78"
-          stroke="#D8A400"
-          strokeWidth="5"
-          strokeLinecap="round"
-          fill="none"
-          strokeDasharray="340"
-          strokeDashoffset="340"
-          style={{ animation: "oilAnim-introPour 0.9s ease-in forwards" }}
-        />
-        {/* ripple where the oil lands */}
-        <circle
-          cx="96"
-          cy="86"
-          r="16"
-          stroke="#D8A400"
-          strokeWidth="2.5"
-          fill="none"
-          style={{ animation: "oilAnim-introRipple 0.9s ease-out 0.75s both" }}
-        />
-        {/* landed droplet */}
-        <path
-          d="M96 70 C 102 80, 106 86, 96 92 C 86 86, 90 80, 96 70Z"
-          fill="#F0B90B"
-          style={{ animation: "oilAnim-introDrop 0.7s ease-out 0.55s both", transformOrigin: "96px 80px" }}
-        />
-        {/* blooming canola flower */}
-        <g style={{ animation: "oilAnim-introBloom 0.6s cubic-bezier(0.34,1.56,0.64,1) 0.9s both", transformOrigin: "40px 120px" }}>
-          <CanolaFlowerIcon cx={40} cy={120} scale={1.4} />
-        </g>
-      </svg>
-    </div>
-  );
-}
-
-// A single small four-petal canola flower — bright yellow petals, thin green
-// stem/leaf — used both for the header texture strip and the intro bloom.
-function CanolaFlowerIcon({ cx = 0, cy = 0, scale = 1 }: { cx?: number; cy?: number; scale?: number }) {
-  return (
-    <g transform={`translate(${cx} ${cy}) scale(${scale})`}>
-      <line x1="0" y1="0" x2="0" y2="16" stroke="#3F7D3A" strokeWidth="2" strokeLinecap="round" />
-      <path d="M0 10 Q -8 8 -9 14" stroke="#3F7D3A" strokeWidth="1.6" fill="none" strokeLinecap="round" />
-      <g>
-        <ellipse cx="0" cy="-7" rx="3.4" ry="5.6" fill="#F6C90E" />
-        <ellipse cx="6.5" cy="-2.5" rx="3.4" ry="5.6" fill="#F6C90E" transform="rotate(72 6.5 -2.5)" />
-        <ellipse cx="4" cy="5.5" rx="3.4" ry="5.6" fill="#F6C90E" transform="rotate(144 4 5.5)" />
-        <ellipse cx="-4" cy="5.5" rx="3.4" ry="5.6" fill="#F6C90E" transform="rotate(216 -4 5.5)" />
-        <ellipse cx="-6.5" cy="-2.5" rx="3.4" ry="5.6" fill="#F6C90E" transform="rotate(288 -6.5 -2.5)" />
-        <circle cx="0" cy="0" r="2.2" fill="#8A4B00" />
-      </g>
-    </g>
-  );
-}
-
-// A thin decorative strip of swaying canola flowers, meant to sit along the
-// bottom edge of the blue header as a subtle "texture" rather than a loud
-// illustration — low opacity, staggered animation delays so the flowers
-// don't all sway in lockstep.
-function HeaderCanolaTexture() {
-  const positions = [8, 15, 24, 33, 42, 52, 62, 71, 80, 89, 96];
-  return (
-    <div className="oilAnim-headerTexture" aria-hidden="true">
-      {positions.map((leftPct, i) => (
-        <svg
-          key={leftPct}
-          className="oilAnim-headerFlower"
-          style={{
-            left: `${leftPct}%`,
-            animationDelay: `${(i % 5) * 0.35}s`,
-          }}
-          width="20"
-          height="26"
-          viewBox="-10 -13 20 26"
-        >
-          <CanolaFlowerIcon scale={i % 3 === 0 ? 0.9 : 0.7} />
-        </svg>
-      ))}
-    </div>
-  );
-}
-
-// A tiny oil-drop glyph used in the Book button's hover decoration.
-function MiniOilDropIcon() {
-  return (
-    <svg width="10" height="12" viewBox="0 0 10 12" fill="none">
-      <path d="M5 0 C 7 4, 10 6.5, 5 12 C 0 6.5, 3 4, 5 0Z" fill="#F0B90B" />
-    </svg>
-  );
-}
-
-// Decorative overlay rendered on top of the Book/Update button: an oil
-// droplet drips from the top on hover, a canola petal drifts across, and a
-// ripple pulses outward on click. Purely visual — pointer-events: none, so
-// it never intercepts the actual submit click.
-function BookButtonDecor() {
-  return (
-    <div className="oilAnim-bookBtnDecor" aria-hidden="true">
-      <div className="oilAnim-dripDrop" style={{ position: "absolute", top: 2, left: "38%" }}>
-        <MiniOilDropIcon />
-      </div>
-      <div className="oilAnim-dripDrop" style={{ position: "absolute", top: 2, left: "63%", animationDelay: "0.5s" }}>
-        <MiniOilDropIcon />
-      </div>
-      <div className="oilAnim-driftPetal" style={{ position: "absolute", top: "50%", left: 6 }}>
-        <svg width="12" height="12" viewBox="-6 -6 12 12">
-          <ellipse cx="0" cy="0" rx="3" ry="5" fill="#FDE58A" />
-        </svg>
-      </div>
-      <span
-        className="oilAnim-clickRipple"
-        style={{
-          position: "absolute",
-          inset: 0,
-          borderRadius: 8,
-          background: "radial-gradient(circle, rgba(240,185,11,0.55) 0%, rgba(240,185,11,0) 70%)",
-        }}
-      />
-    </div>
-  );
-}
-
-// One-time, invisible SVG filter definition that merges separate blurred
-// shapes into one continuous liquid mass (the classic "goo" technique) —
-// referenced by .oilAnim-gooGroup via filter: url(#oilGooFilter). Rendered
-// once per page; width/height 0 so it takes no visual space itself.
-function OilGooFilterDefs() {
-  return (
-    <svg aria-hidden="true" style={{ position: "absolute", width: 0, height: 0 }}>
-      <defs>
-        <filter id="oilGooFilter">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="7" result="blur" />
-          <feColorMatrix
-            in="blur"
-            mode="matrix"
-            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9"
-            result="goo"
-          />
-        </filter>
-      </defs>
-    </svg>
-  );
-}
-
-// Rendered as a sibling over the Book/Update button only while `melting`
-// is true: a blurred sheet, two continuously-looping "leak" streams, and
-// eight staggered drip blobs — all merged into one continuous liquid mass
-// by the goo filter above — pour downward off the button for the full 3s
-// window, with a glossy gradient for volume, a shine sweeping across
-// twice like light on wet oil, and a pulsing puddle shadow where it
-// "lands". Purely visual (pointer-events: none); plays for a fixed 3s
-// while the real submit is deferred, then the qty popup (or the update
-// request) takes over.
-function BookButtonMeltOverlay() {
-  return (
-    <div className="oilAnim-meltStage" aria-hidden="true">
-      <div className="oilAnim-gooGroup">
-        <div className="oilAnim-oilSheet" />
-        <div className="oilAnim-stream oilAnim-stream-1" />
-        <div className="oilAnim-stream oilAnim-stream-2" />
-        <div className="oilAnim-blob oilAnim-blob-1" />
-        <div className="oilAnim-blob oilAnim-blob-2" />
-        <div className="oilAnim-blob oilAnim-blob-3" />
-        <div className="oilAnim-blob oilAnim-blob-4" />
-        <div className="oilAnim-blob oilAnim-blob-5" />
-        <div className="oilAnim-blob oilAnim-blob-6" />
-        <div className="oilAnim-blob oilAnim-blob-7" />
-        <div className="oilAnim-blob oilAnim-blob-8" />
-      </div>
-      <div className="oilAnim-shine" />
-      <div className="oilAnim-puddle" />
-    </div>
-  );
-}
-
 export default function BookPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [towns, setTowns] = useState<Town[]>([]);
@@ -747,18 +218,9 @@ export default function BookPage() {
   // a short delay so it doesn't get stuck if the user copies several.
   const [copiedOrder, setCopiedOrder] = useState<string | null>(null);
   const [showQtyModal, setShowQtyModal] = useState(false);
-  // True for the ~0.9s "turns to oil and flows down" animation played on
-  // the Book/Update button right after a valid submit is confirmed, before
-  // the qty-repeat sheet (new order) or the actual update request (editing
-  // order) proceeds. Reset back to false as soon as that next step starts.
-  const [bookBtnMelting, setBookBtnMelting] = useState(false);
   const [conflictModalNames, setConflictModalNames] = useState<string[] | null>(null);
   const conflictSignatureRef = useRef<string>("");
   const [showWeightLimitModal, setShowWeightLimitModal] = useState(false);
-
-  // One-time decorative intro (oil pour + canola bloom) shown on first
-  // mount only, then dismissed for the rest of the session.
-  const [showIntro, setShowIntro] = useState(true);
 
   // "Edit Order" — a customer can look up an order they already placed by
   // Town + Order ID (acting as a lightweight shared credential) and edit
@@ -1099,23 +561,14 @@ export default function BookPage() {
       return;
     }
 
-    // Play the "button turns to oil and flows down" animation first, then
-    // move to the next step once it's had a full 3s to play out (the
-    // continuous leak streams + 8 staggered drops run the whole window).
-    // The button itself is disabled while bookBtnMelting is true (see the
-    // submit button's disabled prop below) so this can't be triggered twice.
-    setBookBtnMelting(true);
-    window.setTimeout(() => {
-      if (editingOrder) {
-        submitEditOrder(lines);
-      } else {
-        setShowQtyModal(true);
-      }
-    }, 3000);
+    if (editingOrder) {
+      submitEditOrder(lines);
+    } else {
+      setShowQtyModal(true);
+    }
   }
 
   async function bookOrders(copies: number) {
-    setBookBtnMelting(false);
     // Belt-and-braces: same device-time check as handleFormSubmit, in case
     // the clock was tampered with after the qty modal was already open.
     if (deviceTimeTampered) {
@@ -1172,7 +625,6 @@ export default function BookPage() {
   // town_id is sent unchanged (the field is locked in edit mode), so
   // only the quantities can differ from what was originally booked.
   async function submitEditOrder(lines: { item_id: string; qty: number }[]) {
-    setBookBtnMelting(false);
     if (!editingOrder) return;
     if (deviceTimeTampered) {
       setError(DEVICE_TIME_WARNING_MESSAGE);
@@ -1331,9 +783,7 @@ export default function BookPage() {
   if (confirmedOrderNumbers) {
     return (
       <div className={styles.page} style={{ overflowX: "hidden" }}>
-      <OilCanolaAnimationStyles />
-      {showIntro && <PageLoadIntro onDone={() => setShowIntro(false)} />}
-      <main className={`${styles.wrapper} oilAnim-pageIn`} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
+      <main className={styles.wrapper} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
         <Header />
         <div className={styles.confirmCard}>
           <div className={styles.confirmIcon}>
@@ -1399,10 +849,7 @@ export default function BookPage() {
 
   return (
     <div className={styles.page} style={{ overflowX: "hidden" }}>
-    <OilCanolaAnimationStyles />
-    <OilGooFilterDefs />
-    {showIntro && <PageLoadIntro onDone={() => setShowIntro(false)} />}
-    <main className={`${styles.wrapper} oilAnim-pageIn`} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
+    <main className={styles.wrapper} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
       <Header />
 
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
@@ -1626,26 +1073,20 @@ export default function BookPage() {
           </div>
         )}
 
-        <div className={`oilAnim-bookBtnWrap${bookBtnMelting ? " oilAnim-melting" : ""}`}>
-          <button
-            type="submit"
-            disabled={submitting || loading || !!loadError || items.length === 0 || deviceTimeTampered || bookBtnMelting}
-            className={styles.submitBtn}
-            style={{ width: "100%", display: "block", position: "relative", ...urduFont }}
-          >
-            <span className="oilAnim-btnRealLabel">
-              {submitting
-                ? editingOrder
-                  ? "تبدیل ہو رہا ہے..."
-                  : "بک ہو رہا ہے..."
-                : editingOrder
-                ? "تبدیل کریں"
-                : "ابھی بک کریں"}
-            </span>
-          </button>
-          {bookBtnMelting && <BookButtonMeltOverlay />}
-          <BookButtonDecor />
-        </div>
+        <button
+          type="submit"
+          disabled={submitting || loading || !!loadError || items.length === 0 || deviceTimeTampered}
+          className={styles.submitBtn}
+          style={{ width: "100%", display: "block", ...urduFont }}
+        >
+          {submitting
+            ? editingOrder
+              ? "تبدیل ہو رہا ہے..."
+              : "بک ہو رہا ہے..."
+            : editingOrder
+            ? "تبدیل کریں"
+            : "ابھی بک کریں"}
+        </button>
       </form>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 20, padding: "14px 0", fontSize: 12, color: "#888", lineHeight: 1.7 }}>
@@ -1758,47 +1199,31 @@ export default function BookPage() {
       )}
 
       {showQtyModal && (
-        <div
-          className="oilAnim-qtyCenterOverlay"
-          onClick={() => {
-            setShowQtyModal(false);
-            setBookBtnMelting(false);
-          }}
-        >
-          <div className="oilAnim-qtyCenterBox" onClick={(e) => e.stopPropagation()}>
-            <div className="oilAnim-qtyFrameWrap">
-              <div className="oilAnim-qtyWhiteFill" />
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/oil-frame.png" alt="" className="oilAnim-qtyFrameImg" />
-              <div className="oilAnim-qtyContent">
-                <h2 style={{ fontSize: 16, margin: "0 0 4px", color: "#0b2b5b" }}>Order Quantity</h2>
-                <p style={{ fontSize: 13, color: "#666", margin: "0 0 10px", ...urduFont, textAlign: "center" }}>
-                  اس ایک ہی آرڈر کے لیے کتنے بل بک کیے جائیں؟
-                </p>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-                  {QTY_OPTIONS.map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => bookOrders(n)}
-                      style={{ ...qtyOptionButtonStyle, flex: "0 1 50px", padding: "8px 0" }}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                </div>
+        <div style={modalOverlayStyle} onClick={() => setShowQtyModal(false)}>
+          <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ fontSize: 17, margin: "0 0 4px", color: "#0b2b5b" }}>Order Quantity</h2>
+            <p style={{ fontSize: 14, color: "#666", margin: "0 0 16px", ...urduFont, textAlign: "right" }}>
+              اس ایک ہی آرڈر کے لیے کتنے بل بک کیے جائیں؟
+            </p>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {QTY_OPTIONS.map((n) => (
                 <button
+                  key={n}
                   type="button"
-                  onClick={() => {
-                    setShowQtyModal(false);
-                    setBookBtnMelting(false);
-                  }}
-                  style={{ marginTop: 10, background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: 12 }}
+                  onClick={() => bookOrders(n)}
+                  style={qtyOptionButtonStyle}
                 >
-                  Cancel
+                  {n}
                 </button>
-              </div>
+              ))}
             </div>
+            <button
+              type="button"
+              onClick={() => setShowQtyModal(false)}
+              style={{ marginTop: 16, background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: 13 }}
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}
@@ -1932,9 +1357,8 @@ function BookingClosedOverlay({ remainingMs }: { remainingMs: number }) {
 
 function Header() {
   return (
-    <div className={styles.hero} style={{ position: "relative", overflow: "hidden" }}>
-      <HeaderCanolaTexture />
-      <div className={styles.logoRow} style={{ position: "relative", zIndex: 1 }}>
+    <div className={styles.hero}>
+      <div className={styles.logoRow}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/logo.jpg" alt="ASIA GHEE MILLS (Pvt.) Ltd." className={styles.logo} />
         <div>
@@ -1943,7 +1367,7 @@ function Header() {
         </div>
       </div>
 
-      <Link href="/admin" title="Admin panel" aria-label="Open admin panel" className={styles.gearBtn} style={{ position: "relative", zIndex: 1 }}>
+      <Link href="/admin" title="Admin panel" aria-label="Open admin panel" className={styles.gearBtn}>
         <SettingsIcon />
       </Link>
     </div>
