@@ -44,6 +44,11 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
   const [status, setStatus] = useState<OrderStatus>("pending");
   const [notes, setNotes] = useState("");
   const [qtys, setQtys] = useState<Record<string, string>>({});
+  // Snapshot rate/weight this order's lines actually had when loaded —
+  // used instead of the live catalog rate so the edit screen (and the
+  // save it produces) shows/keeps the order's real booked price, not
+  // today's price, for any item already on the order.
+  const [originalLines, setOriginalLines] = useState<Record<string, { rate: number; weight_kg: number }>>({});
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,10 +74,15 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
         setNotes(o.notes ?? "");
 
         const initialQtys: Record<string, string> = {};
+        const initialOriginal: Record<string, { rate: number; weight_kg: number }> = {};
         for (const line of o.order_items) {
-          if (line.item_id) initialQtys[line.item_id] = String(line.qty);
+          if (line.item_id) {
+            initialQtys[line.item_id] = String(line.qty);
+            initialOriginal[line.item_id] = { rate: line.rate, weight_kg: line.weight_kg };
+          }
         }
         setQtys(initialQtys);
+        setOriginalLines(initialOriginal);
 
         setItems(itemsJson.items ?? []);
         setTowns(townsJson.towns ?? []);
@@ -92,9 +102,15 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
   const rows = useMemo(() => {
     return items.map((item) => {
       const qty = parseFloat(qtys[item.id] || "0") || 0;
-      return { item, qty, amount: qty * item.rate, weight: qty * item.weight_kg, kind: getIconKind(item) };
+      // Item already on this order → keep its booked rate/weight, even
+      // if the catalog price has since changed. Only an item newly
+      // added to the order (not originally on it) uses today's rate.
+      const original = originalLines[item.id];
+      const rate = original ? original.rate : item.rate;
+      const weightKg = original ? original.weight_kg : item.weight_kg;
+      return { item, qty, rate, amount: qty * rate, weight: qty * weightKg, kind: getIconKind(item) };
     });
-  }, [items, qtys]);
+  }, [items, qtys, originalLines]);
 
   const totals = useMemo(() => {
     let amount = 0;
@@ -190,41 +206,50 @@ export default function EditOrderPage({ params }: { params: { id: string } }) {
       <div style={{ background: "#fff", border: `1px solid ${YELLOW}`, borderRadius: 10, overflow: "hidden", marginBottom: 12, width: "100%" }}>
         <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 13 }}>
           <colgroup>
-            <col style={{ width: "48%" }} />
-            <col style={{ width: "18%" }} />
-            <col style={{ width: "17%" }} />
-            <col style={{ width: "17%" }} />
+            <col style={{ width: "38%" }} />
+            <col style={{ width: "15%" }} />
+            <col style={{ width: "15%" }} />
+            <col style={{ width: "16%" }} />
+            <col style={{ width: "16%" }} />
           </colgroup>
           <thead>
             <tr style={{ background: NAVY, textAlign: "left" }}>
               <th style={thStyle}>Item</th>
               <th style={{ ...thStyle, textAlign: "center" }}>Qty</th>
+              <th style={{ ...thStyle, textAlign: "right" }}>Rate</th>
               <th style={{ ...thStyle, textAlign: "right" }}>Amount</th>
               <th style={{ ...thStyle, textAlign: "right" }}>Weight</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ item, qty, amount, weight }) => (
-              <tr key={item.id} style={{ borderBottom: "1px solid #f3e6b0" }}>
-                <td style={{ ...tdStyle, whiteSpace: "normal", wordBreak: "break-word" }}>{item.name}</td>
-                <td style={{ ...tdStyle, textAlign: "center" }}>
-                  <input
-                    type="number"
-                    min={0}
-                    step="1"
-                    value={qtys[item.id] ?? ""}
-                    onChange={(e) => updateQty(item.id, e.target.value)}
-                    style={{ width: "100%", maxWidth: 56, boxSizing: "border-box", textAlign: "center", padding: 4, border: "1px solid #d9dde6", borderRadius: 4 }}
-                  />
-                </td>
-                <td style={{ ...tdStyle, textAlign: "right" }}>{amount ? amount.toLocaleString() : 0}</td>
-                <td style={{ ...tdStyle, textAlign: "right" }}>{weight ? weight.toFixed(2) : 0}</td>
-              </tr>
-            ))}
+            {rows.map(({ item, qty, rate, amount, weight }) => {
+              const isBookedRate = originalLines[item.id] !== undefined;
+              const rateChanged = isBookedRate && rate !== item.rate;
+              return (
+                <tr key={item.id} style={{ borderBottom: "1px solid #f3e6b0" }}>
+                  <td style={{ ...tdStyle, whiteSpace: "normal", wordBreak: "break-word" }}>{item.name}</td>
+                  <td style={{ ...tdStyle, textAlign: "center" }}>
+                    <input
+                      type="number"
+                      min={0}
+                      step="1"
+                      value={qtys[item.id] ?? ""}
+                      onChange={(e) => updateQty(item.id, e.target.value)}
+                      style={{ width: "100%", maxWidth: 56, boxSizing: "border-box", textAlign: "center", padding: 4, border: "1px solid #d9dde6", borderRadius: 4 }}
+                    />
+                  </td>
+                  <td style={{ ...tdStyle, textAlign: "right", color: rateChanged ? RED : undefined }} title={rateChanged ? `Booked rate — current catalog rate is ${item.rate}` : undefined}>
+                    {rate.toLocaleString()}
+                  </td>
+                  <td style={{ ...tdStyle, textAlign: "right" }}>{amount ? amount.toLocaleString() : 0}</td>
+                  <td style={{ ...tdStyle, textAlign: "right" }}>{weight ? weight.toFixed(2) : 0}</td>
+                </tr>
+              );
+            })}
           </tbody>
           <tfoot>
             <tr style={{ background: "#fafbfd", fontWeight: 700 }}>
-              <td style={tdStyle} colSpan={2}>Total</td>
+              <td style={tdStyle} colSpan={3}>Total</td>
               <td style={{ ...tdStyle, textAlign: "right" }}>{totals.amount.toLocaleString()}</td>
               <td style={{ ...tdStyle, textAlign: "right" }}>{totals.weight.toFixed(2)} kg</td>
             </tr>

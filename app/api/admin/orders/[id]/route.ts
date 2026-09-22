@@ -26,9 +26,19 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
 // PATCH /api/admin/orders/:id — update status/notes/town, and optionally
 // replace the order's line items entirely (body.lines), recalculating
-// total_amount/total_weight_kg the same way the public booking endpoint
-// does — server re-fetches current rate/weight per item rather than
-// trusting whatever the client sends.
+// total_amount/total_weight_kg.
+//
+// Rate/weight handling: an order's line items are a PRICE SNAPSHOT taken
+// at booking time and must never drift just because the admin edits the
+// order later (e.g. to fix a qty, change status, or change town) — a
+// price change on the catalog should only ever affect orders placed
+// AFTER that change, never orders that already exist. So for any line
+// whose item_id was already part of this order, we reuse the rate and
+// weight_kg it already had — we do NOT re-fetch the item's current
+// catalog rate for it. Only a line whose item_id is genuinely new to
+// this order (the admin adding an item that wasn't on it before) gets
+// priced at the item's current catalog rate, exactly like a brand new
+// booking would.
 export async function PATCH(req: NextRequest, { params }: Params) {
   const body = await req.json();
   const patch: Record<string, any> = {};
@@ -59,34 +69,80 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: "Enter a quantity for at least one item" }, { status: 400 });
     }
 
-    const itemIds = qtyLines.map((l: any) => l.item_id);
-    const { data: items, error: itemsError } = await supabaseServer
+    // What this order's lines looked like BEFORE this edit — the source
+    // of truth for rate/weight_kg on any item_id that was already here.
+    const { data: existingLines, error: existingError } = await supabaseServer
+      .from("order_items")
+      .select("item_id, rate, weight_kg")
+      .eq("order_id", params.id);
+
+    if (existingError) {
+      return NextResponse.json({ error: existingError.message }, { status: 500 });
+    }
+
+    const existingByItemId = new Map(
+      (existingLines ?? []).filter((l: any) => l.item_id).map((l: any) => [l.item_id, l])
+    );
+
+    // Only fetch current catalog rate/weight for lines that are new to
+    // this order — existing lines keep their original snapshot and
+    // never need the live catalog value.
+    const newItemIds = qtyLines
+      .map((l: any) => l.item_id)
+      .filter((id: string) => !existingByItemId.has(id));
+
+    const itemById = new Map<string, any>();
+    if (newItemIds.length > 0) {
+      const { data: items, error: itemsError } = await supabaseServer
+        .from("items")
+        .select("id, name, weight_kg, rate, type")
+        .in("id", newItemIds);
+
+      if (itemsError) {
+        return NextResponse.json({ error: itemsError.message }, { status: 500 });
+      }
+      if (!items || items.length !== newItemIds.length) {
+        return NextResponse.json({ error: "One or more items no longer exist" }, { status: 400 });
+      }
+      for (const it of items) itemById.set(it.id, it);
+    }
+
+    // Need name/type for every line (existing lines don't carry these
+    // in existingByItemId), so fetch the full current catalog rows for
+    // ALL item_ids involved — but rate/weight_kg below still prefer the
+    // preserved snapshot over these current values.
+    const allItemIds = qtyLines.map((l: any) => l.item_id);
+    const { data: allItems, error: allItemsError } = await supabaseServer
       .from("items")
       .select("id, name, weight_kg, rate, type")
-      .in("id", itemIds);
+      .in("id", allItemIds);
 
-    if (itemsError) {
-      return NextResponse.json({ error: itemsError.message }, { status: 500 });
+    if (allItemsError) {
+      return NextResponse.json({ error: allItemsError.message }, { status: 500 });
     }
-    if (!items || items.length !== itemIds.length) {
+    if (!allItems || allItems.length !== allItemIds.length) {
       return NextResponse.json({ error: "One or more items no longer exist" }, { status: 400 });
     }
+    const catalogById = new Map(allItems.map((i) => [i.id, i]));
 
-    const itemById = new Map(items.map((i) => [i.id, i]));
     let totalAmount = 0;
     let totalWeightKg = 0;
 
     const newLines = qtyLines.map((line: any) => {
-      const item = itemById.get(line.item_id)!;
-      totalAmount += Math.round(item.rate * line.qty * 100) / 100;
-      totalWeightKg += item.weight_kg * line.qty;
+      const catalogItem = catalogById.get(line.item_id)!;
+      const existing = existingByItemId.get(line.item_id) as { rate: number; weight_kg: number } | undefined;
+      const rate = existing ? existing.rate : catalogItem.rate;
+      const weightKg = existing ? existing.weight_kg : catalogItem.weight_kg;
+
+      totalAmount += Math.round(rate * line.qty * 100) / 100;
+      totalWeightKg += weightKg * line.qty;
       return {
         order_id: params.id,
-        item_id: item.id,
-        item_name: item.name,
-        item_type: item.type,
-        rate: item.rate,
-        weight_kg: item.weight_kg,
+        item_id: catalogItem.id,
+        item_name: catalogItem.name,
+        item_type: catalogItem.type,
+        rate,
+        weight_kg: weightKg,
         qty: line.qty,
       };
     });

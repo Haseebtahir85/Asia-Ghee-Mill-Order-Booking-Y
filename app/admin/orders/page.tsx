@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Order, OrderStatus } from "@/lib/types";
+import { Order, OrderStatus, Town } from "@/lib/types";
 
 const NAVY = "#0b2b5b";
 const YELLOW = "#F6C90E";
@@ -383,6 +383,10 @@ function DateRangePicker({
 export default function AdminOrdersPage() {
   const [activeTab, setActiveTab] = useState<OrdersTab>("new");
   const [allOrders, setAllOrders] = useState<Order[]>([]);
+  // Per-town discount %, so this list's Net Amount matches the amount
+  // actually printed on each order's bill (lib/ordersPdf.ts applies
+  // the same town discount per line and sums those net amounts).
+  const [discountByTownId, setDiscountByTownId] = useState<Record<string, number>>({});
   const [lastExportAt, setLastExportAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "">("");
@@ -411,6 +415,20 @@ export default function AdminOrdersPage() {
     setAllOrders(json.orders ?? []);
   }
 
+  async function loadTowns() {
+    try {
+      const res = await fetch("/api/admin/towns");
+      const json = await res.json();
+      const map: Record<string, number> = {};
+      for (const t of (json.towns ?? []) as Town[]) {
+        map[t.id] = t.discount ?? 0;
+      }
+      setDiscountByTownId(map);
+    } catch {
+      // If this fails, Net Amount just falls back to 0% discount below.
+    }
+  }
+
   // Reads the "New Order" marker (admin_settings.last_order_export_at)
   // without touching it — this is what draws the line between the New
   // Orders tab and the All Orders tab. Read-only GET on the same route
@@ -433,11 +451,19 @@ export default function AdminOrdersPage() {
   useEffect(() => {
     async function init() {
       setLoading(true);
-      await Promise.all([loadOrders(), loadMarker()]);
+      await Promise.all([loadOrders(), loadMarker(), loadTowns()]);
       setLoading(false);
     }
     init();
   }, []);
+
+  // Net amount = what the customer actually owes after their town's
+  // discount — same figure the printed bill totals to, since the
+  // discount % is uniform across an order's lines.
+  function netAmount(o: Order): number {
+    const discount = (o.town_id && discountByTownId[o.town_id]) || 0;
+    return o.total_amount * (1 - discount / 100);
+  }
 
   // Town filter options come straight from the orders actually loaded —
   // never the full towns catalog, so it only ever lists towns that appear
@@ -792,6 +818,7 @@ export default function AdminOrdersPage() {
               <th style={thStyle}>Date &amp; Time</th>
               <th style={thStyle}>Town</th>
               <th style={thStyle}>Amount</th>
+              <th style={thStyle}>Net Amount</th>
               <th style={thStyle}>Weight (Ton)</th>
               <th style={thStyle}>Status</th>
               <th style={thStyle}></th>
@@ -807,6 +834,7 @@ export default function AdminOrdersPage() {
                   <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{formatDateTime(o.created_at)}</td>
                   <td style={tdStyle}>{o.town ?? ""}</td>
                   <td style={tdStyle}>{o.total_amount.toLocaleString()}</td>
+                  <td style={tdStyle}>{Math.round(netAmount(o)).toLocaleString()}</td>
                   <td style={tdStyle}>{(o.total_weight_kg / 1000).toFixed(3)}</td>
                   <td style={tdStyle}>
                     <select
