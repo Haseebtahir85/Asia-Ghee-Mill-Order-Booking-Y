@@ -199,6 +199,277 @@ function getPackFamily(item: Item): 10 | 12 | null {
 
 const QTY_OPTIONS = [1, 2, 3, 4];
 
+// ---------------------------------------------------------------------------
+// Canola / cooking-oil themed animation styles.
+//
+// Kept as one injected <style> block (rather than in book.module.css, which
+// isn't available to edit here) so every animation used below — the one-time
+// page-load intro, the header's swaying flower texture, and the Book button's
+// oil-drip / ripple / petal-drift hover effects — lives in one place. Move
+// these rules into book.module.css any time; the class/keyframe names won't
+// collide with anything already in that file since they're all prefixed
+// `oilAnim-`.
+// ---------------------------------------------------------------------------
+function OilCanolaAnimationStyles() {
+  return (
+    <style>{`
+      @keyframes oilAnim-pageFadeSlideUp {
+        from { opacity: 0; transform: translateY(18px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes oilAnim-introPour {
+        0%   { stroke-dashoffset: 340; opacity: 1; }
+        70%  { stroke-dashoffset: 0; opacity: 1; }
+        100% { stroke-dashoffset: 0; opacity: 0; }
+      }
+      @keyframes oilAnim-introDrop {
+        0%   { transform: translateY(-40px); opacity: 0; }
+        35%  { opacity: 1; }
+        60%  { transform: translateY(0); opacity: 1; }
+        100% { transform: translateY(6px); opacity: 0; }
+      }
+      @keyframes oilAnim-introRipple {
+        0%   { transform: scale(0.2); opacity: 0; }
+        45%  { opacity: 0.55; }
+        100% { transform: scale(2.6); opacity: 0; }
+      }
+      @keyframes oilAnim-introBloom {
+        0%   { transform: scale(0) rotate(-25deg); opacity: 0; }
+        60%  { transform: scale(1.15) rotate(6deg); opacity: 1; }
+        100% { transform: scale(1) rotate(0deg); opacity: 1; }
+      }
+      @keyframes oilAnim-introFadeOut {
+        0%   { opacity: 1; }
+        80%  { opacity: 1; }
+        100% { opacity: 0; visibility: hidden; }
+      }
+      @keyframes oilAnim-flowerSway {
+        0%, 100% { transform: rotate(-6deg) translateY(0); }
+        50%      { transform: rotate(6deg) translateY(-1.5px); }
+      }
+      @keyframes oilAnim-petalDrift {
+        0%   { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+        15%  { opacity: 0.9; }
+        100% { transform: translate(58px, -10px) rotate(140deg); opacity: 0; }
+      }
+      @keyframes oilAnim-dripFall {
+        0%   { transform: translateY(-6px) scaleY(0.7); opacity: 0; }
+        30%  { opacity: 1; }
+        75%  { transform: translateY(20px) scaleY(1); opacity: 1; }
+        100% { transform: translateY(26px) scaleY(1); opacity: 0; }
+      }
+      @keyframes oilAnim-btnRipple {
+        0%   { transform: scale(0); opacity: 0.45; }
+        100% { transform: scale(1); opacity: 0; }
+      }
+
+      .oilAnim-pageIn {
+        animation: oilAnim-pageFadeSlideUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+
+      .oilAnim-headerTexture {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+        border-radius: inherit;
+        z-index: 0;
+      }
+      .oilAnim-headerFlower {
+        position: absolute;
+        bottom: -6px;
+        transform-origin: bottom center;
+        animation: oilAnim-flowerSway 4.5s ease-in-out infinite;
+        opacity: 0.85;
+      }
+
+      .oilAnim-bookBtnWrap {
+        position: relative;
+        isolation: isolate;
+      }
+      .oilAnim-bookBtnDecor {
+        position: absolute;
+        inset: 0;
+        overflow: visible;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.25s ease;
+      }
+      .oilAnim-bookBtnWrap:hover .oilAnim-bookBtnDecor {
+        opacity: 1;
+      }
+      .oilAnim-bookBtnWrap:hover .oilAnim-dripDrop {
+        animation: oilAnim-dripFall 1.1s ease-in infinite;
+      }
+      .oilAnim-bookBtnWrap:hover .oilAnim-driftPetal {
+        animation: oilAnim-petalDrift 1.6s ease-out infinite;
+      }
+      .oilAnim-bookBtnWrap:active .oilAnim-clickRipple {
+        animation: oilAnim-btnRipple 0.55s ease-out;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .oilAnim-pageIn,
+        .oilAnim-headerFlower,
+        .oilAnim-bookBtnWrap:hover .oilAnim-dripDrop,
+        .oilAnim-bookBtnWrap:hover .oilAnim-driftPetal,
+        .oilAnim-bookBtnWrap:active .oilAnim-clickRipple {
+          animation: none !important;
+        }
+      }
+    `}</style>
+  );
+}
+
+// One-time intro shown over the page on first mount: an oil stream "pours"
+// in, lands as a droplet with a ripple, and a canola flower blooms beside
+// it — then the whole thing fades out and stops blocking clicks. Purely
+// decorative; it never gates or delays the real booking form underneath.
+function PageLoadIntro({ onDone }: { onDone: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 1500);
+    return () => clearTimeout(t);
+  }, [onDone]);
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9998,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "rgba(255,255,255,0.92)",
+        backdropFilter: "blur(2px)",
+        WebkitBackdropFilter: "blur(2px)",
+        pointerEvents: "none",
+        animation: "oilAnim-introFadeOut 1.5s ease forwards",
+      }}
+    >
+      <svg width="180" height="160" viewBox="0 0 180 160" fill="none">
+        {/* pouring oil stream */}
+        <path
+          d="M60 6 C 66 40, 92 55, 96 78"
+          stroke="#D8A400"
+          strokeWidth="5"
+          strokeLinecap="round"
+          fill="none"
+          strokeDasharray="340"
+          strokeDashoffset="340"
+          style={{ animation: "oilAnim-introPour 0.9s ease-in forwards" }}
+        />
+        {/* ripple where the oil lands */}
+        <circle
+          cx="96"
+          cy="86"
+          r="16"
+          stroke="#D8A400"
+          strokeWidth="2.5"
+          fill="none"
+          style={{ animation: "oilAnim-introRipple 0.9s ease-out 0.75s both" }}
+        />
+        {/* landed droplet */}
+        <path
+          d="M96 70 C 102 80, 106 86, 96 92 C 86 86, 90 80, 96 70Z"
+          fill="#F0B90B"
+          style={{ animation: "oilAnim-introDrop 0.7s ease-out 0.55s both", transformOrigin: "96px 80px" }}
+        />
+        {/* blooming canola flower */}
+        <g style={{ animation: "oilAnim-introBloom 0.6s cubic-bezier(0.34,1.56,0.64,1) 0.9s both", transformOrigin: "40px 120px" }}>
+          <CanolaFlowerIcon cx={40} cy={120} scale={1.4} />
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+// A single small four-petal canola flower — bright yellow petals, thin green
+// stem/leaf — used both for the header texture strip and the intro bloom.
+function CanolaFlowerIcon({ cx = 0, cy = 0, scale = 1 }: { cx?: number; cy?: number; scale?: number }) {
+  return (
+    <g transform={`translate(${cx} ${cy}) scale(${scale})`}>
+      <line x1="0" y1="0" x2="0" y2="16" stroke="#3F7D3A" strokeWidth="2" strokeLinecap="round" />
+      <path d="M0 10 Q -8 8 -9 14" stroke="#3F7D3A" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+      <g>
+        <ellipse cx="0" cy="-7" rx="3.4" ry="5.6" fill="#F6C90E" />
+        <ellipse cx="6.5" cy="-2.5" rx="3.4" ry="5.6" fill="#F6C90E" transform="rotate(72 6.5 -2.5)" />
+        <ellipse cx="4" cy="5.5" rx="3.4" ry="5.6" fill="#F6C90E" transform="rotate(144 4 5.5)" />
+        <ellipse cx="-4" cy="5.5" rx="3.4" ry="5.6" fill="#F6C90E" transform="rotate(216 -4 5.5)" />
+        <ellipse cx="-6.5" cy="-2.5" rx="3.4" ry="5.6" fill="#F6C90E" transform="rotate(288 -6.5 -2.5)" />
+        <circle cx="0" cy="0" r="2.2" fill="#8A4B00" />
+      </g>
+    </g>
+  );
+}
+
+// A thin decorative strip of swaying canola flowers, meant to sit along the
+// bottom edge of the blue header as a subtle "texture" rather than a loud
+// illustration — low opacity, staggered animation delays so the flowers
+// don't all sway in lockstep.
+function HeaderCanolaTexture() {
+  const positions = [8, 15, 24, 33, 42, 52, 62, 71, 80, 89, 96];
+  return (
+    <div className="oilAnim-headerTexture" aria-hidden="true">
+      {positions.map((leftPct, i) => (
+        <svg
+          key={leftPct}
+          className="oilAnim-headerFlower"
+          style={{
+            left: `${leftPct}%`,
+            animationDelay: `${(i % 5) * 0.35}s`,
+          }}
+          width="20"
+          height="26"
+          viewBox="-10 -13 20 26"
+        >
+          <CanolaFlowerIcon scale={i % 3 === 0 ? 0.9 : 0.7} />
+        </svg>
+      ))}
+    </div>
+  );
+}
+
+// A tiny oil-drop glyph used in the Book button's hover decoration.
+function MiniOilDropIcon() {
+  return (
+    <svg width="10" height="12" viewBox="0 0 10 12" fill="none">
+      <path d="M5 0 C 7 4, 10 6.5, 5 12 C 0 6.5, 3 4, 5 0Z" fill="#F0B90B" />
+    </svg>
+  );
+}
+
+// Decorative overlay rendered on top of the Book/Update button: an oil
+// droplet drips from the top on hover, a canola petal drifts across, and a
+// ripple pulses outward on click. Purely visual — pointer-events: none, so
+// it never intercepts the actual submit click.
+function BookButtonDecor() {
+  return (
+    <div className="oilAnim-bookBtnDecor" aria-hidden="true">
+      <div className="oilAnim-dripDrop" style={{ position: "absolute", top: 2, left: "38%" }}>
+        <MiniOilDropIcon />
+      </div>
+      <div className="oilAnim-dripDrop" style={{ position: "absolute", top: 2, left: "63%", animationDelay: "0.5s" }}>
+        <MiniOilDropIcon />
+      </div>
+      <div className="oilAnim-driftPetal" style={{ position: "absolute", top: "50%", left: 6 }}>
+        <svg width="12" height="12" viewBox="-6 -6 12 12">
+          <ellipse cx="0" cy="0" rx="3" ry="5" fill="#FDE58A" />
+        </svg>
+      </div>
+      <span
+        className="oilAnim-clickRipple"
+        style={{
+          position: "absolute",
+          inset: 0,
+          borderRadius: 8,
+          background: "radial-gradient(circle, rgba(240,185,11,0.55) 0%, rgba(240,185,11,0) 70%)",
+        }}
+      />
+    </div>
+  );
+}
+
 export default function BookPage() {
   const [items, setItems] = useState<Item[]>([]);
   const [towns, setTowns] = useState<Town[]>([]);
@@ -221,6 +492,10 @@ export default function BookPage() {
   const [conflictModalNames, setConflictModalNames] = useState<string[] | null>(null);
   const conflictSignatureRef = useRef<string>("");
   const [showWeightLimitModal, setShowWeightLimitModal] = useState(false);
+
+  // One-time decorative intro (oil pour + canola bloom) shown on first
+  // mount only, then dismissed for the rest of the session.
+  const [showIntro, setShowIntro] = useState(true);
 
   // "Edit Order" — a customer can look up an order they already placed by
   // Town + Order ID (acting as a lightweight shared credential) and edit
@@ -769,7 +1044,9 @@ export default function BookPage() {
   if (confirmedOrderNumbers) {
     return (
       <div className={styles.page} style={{ overflowX: "hidden" }}>
-      <main className={styles.wrapper} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
+      <OilCanolaAnimationStyles />
+      {showIntro && <PageLoadIntro onDone={() => setShowIntro(false)} />}
+      <main className={`${styles.wrapper} oilAnim-pageIn`} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
         <Header />
         <div className={styles.confirmCard}>
           <div className={styles.confirmIcon}>
@@ -835,7 +1112,9 @@ export default function BookPage() {
 
   return (
     <div className={styles.page} style={{ overflowX: "hidden" }}>
-    <main className={styles.wrapper} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
+    <OilCanolaAnimationStyles />
+    {showIntro && <PageLoadIntro onDone={() => setShowIntro(false)} />}
+    <main className={`${styles.wrapper} oilAnim-pageIn`} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
       <Header />
 
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
@@ -1059,20 +1338,23 @@ export default function BookPage() {
           </div>
         )}
 
-        <button
-          type="submit"
-          disabled={submitting || loading || !!loadError || items.length === 0 || deviceTimeTampered}
-          className={styles.submitBtn}
-          style={{ width: "100%", display: "block", ...urduFont }}
-        >
-          {submitting
-            ? editingOrder
-              ? "تبدیل ہو رہا ہے..."
-              : "بک ہو رہا ہے..."
-            : editingOrder
-            ? "تبدیل کریں"
-            : "ابھی بک کریں"}
-        </button>
+        <div className="oilAnim-bookBtnWrap">
+          <button
+            type="submit"
+            disabled={submitting || loading || !!loadError || items.length === 0 || deviceTimeTampered}
+            className={styles.submitBtn}
+            style={{ width: "100%", display: "block", ...urduFont }}
+          >
+            {submitting
+              ? editingOrder
+                ? "تبدیل ہو رہا ہے..."
+                : "بک ہو رہا ہے..."
+              : editingOrder
+              ? "تبدیل کریں"
+              : "ابھی بک کریں"}
+          </button>
+          <BookButtonDecor />
+        </div>
       </form>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 20, padding: "14px 0", fontSize: 12, color: "#888", lineHeight: 1.7 }}>
@@ -1343,8 +1625,9 @@ function BookingClosedOverlay({ remainingMs }: { remainingMs: number }) {
 
 function Header() {
   return (
-    <div className={styles.hero}>
-      <div className={styles.logoRow}>
+    <div className={styles.hero} style={{ position: "relative", overflow: "hidden" }}>
+      <HeaderCanolaTexture />
+      <div className={styles.logoRow} style={{ position: "relative", zIndex: 1 }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/logo.jpg" alt="ASIA GHEE MILLS (Pvt.) Ltd." className={styles.logo} />
         <div>
@@ -1353,7 +1636,7 @@ function Header() {
         </div>
       </div>
 
-      <Link href="/admin" title="Admin panel" aria-label="Open admin panel" className={styles.gearBtn}>
+      <Link href="/admin" title="Admin panel" aria-label="Open admin panel" className={styles.gearBtn} style={{ position: "relative", zIndex: 1 }}>
         <SettingsIcon />
       </Link>
     </div>
