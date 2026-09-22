@@ -623,7 +623,21 @@ export default function BookPage() {
     new URLSearchParams(window.location.search).get("forceClosed") === "1" &&
     new URLSearchParams(window.location.search).get("key") === TEST_OVERRIDE_KEY;
 
-  const bookingClosed = bookingClosedByTime || forceClosedForTesting;
+  // Private bypass link — only opens the form outside 9am–6pm PKT when the
+  // page is visited with BOTH ?bypassClosed=1 and the exact secret key
+  // below. Anyone without that link sees the normal closed-hours popup as
+  // usual; this never widens booking hours for regular visitors. Change
+  // BYPASS_KEY to your own private value, and remove this block once
+  // you're done testing — it stays purely client-side, so if any API
+  // route also checks the hour window server-side, this bypass alone
+  // won't let a booked order through on its own.
+  const BYPASS_KEY = "asia-owner-bypass-2026";
+  const bypassClosedForTesting =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("bypassClosed") === "1" &&
+    new URLSearchParams(window.location.search).get("key") === BYPASS_KEY;
+
+  const bookingClosed = (bookingClosedByTime && !bypassClosedForTesting) || forceClosedForTesting;
   const closedRemainingMs =
     nowCorrectedMs !== null ? Math.max(0, getNextOpenTimeMs(nowCorrectedMs) - nowCorrectedMs) : 0;
 
