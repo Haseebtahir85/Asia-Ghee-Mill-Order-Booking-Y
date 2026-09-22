@@ -265,13 +265,11 @@ function OilCanolaAnimationStyles() {
 
       /* Book button "turns to oil and flows down" — realistic version.
          A blurred group of blobs (merged into one continuous liquid mass
-         via the #oilGooFilter SVG filter below) grows out of the button,
-         necks, and drips downward as separate droplets; a glossy gradient
-         gives the mass volume/depth, a diagonal shine sweeps across it
-         like light on a wet surface, and a soft puddle shadow appears
-         where it "lands". This is CSS/SVG, not a video/WebGL render, but
-         the goo-filter + lighting combo is the standard technique used
-         for convincing liquid UI. */
+         via the #oilGooFilter SVG filter below) grows out of the button;
+         a constant central stream keeps "leaking" for the whole 3s while
+         eight individual drops peel off at staggered times and fall; a
+         glossy gradient gives it volume, a shine sweeps across twice like
+         light on wet oil, and a puddle shadow grows where it lands. */
       .oilAnim-meltStage {
         position: absolute;
         inset: 0;
@@ -291,8 +289,8 @@ function OilCanolaAnimationStyles() {
         background: linear-gradient(160deg, #FCE175 0%, #F6C90E 32%, #D8A400 68%, #8A5A00 100%);
         transform: scaleY(0);
         transform-origin: top;
-        animation: oilAnim-sheetGrow 0.45s cubic-bezier(0.65, 0, 0.35, 1) forwards,
-                   oilAnim-liquidWobble 0.45s ease-in-out forwards;
+        animation: oilAnim-sheetGrow 0.4s cubic-bezier(0.65, 0, 0.35, 1) forwards,
+                   oilAnim-liquidWobble 2.6s ease-in-out 0.4s infinite;
       }
       @keyframes oilAnim-sheetGrow {
         0%   { transform: scaleY(0); opacity: 0; }
@@ -300,8 +298,31 @@ function OilCanolaAnimationStyles() {
         100% { transform: scaleY(1); opacity: 1; }
       }
       @keyframes oilAnim-liquidWobble {
-        0%, 100% { transform: scaleY(1) skewX(0deg); }
-        50%      { transform: scaleY(1) skewX(-2.5deg); }
+        0%, 100% { transform: skewX(0deg); }
+        50%      { transform: skewX(-1.6deg); }
+      }
+      /* Two always-on "leak" streams at the base of the sheet, looping the
+         whole 3s so oil keeps visibly flowing rather than just a handful
+         of one-off drips. */
+      .oilAnim-stream {
+        position: absolute;
+        bottom: -4px;
+        width: 9px;
+        height: 20px;
+        border-radius: 50%;
+        background: linear-gradient(180deg, #FDE58A 0%, #F0B90B 55%, #D8A400 100%);
+        transform: translate(-50%, 0) scaleY(0.3);
+        transform-origin: top center;
+        opacity: 0;
+        animation: oilAnim-streamFlow 0.55s ease-in 0.45s infinite;
+      }
+      .oilAnim-stream-1 { left: 40%; }
+      .oilAnim-stream-2 { left: 62%; animation-delay: 0.72s; }
+      @keyframes oilAnim-streamFlow {
+        0%   { transform: translate(-50%, 0) scaleY(0.3); opacity: 0; }
+        20%  { opacity: 1; }
+        70%  { transform: translate(-50%, 46px) scaleY(2.2); opacity: 1; }
+        100% { transform: translate(-50%, 78px) scaleY(2.6); opacity: 0; }
       }
       .oilAnim-blob {
         position: absolute;
@@ -309,18 +330,21 @@ function OilCanolaAnimationStyles() {
         border-radius: 50%;
         background: radial-gradient(circle at 34% 28%, #FDE58A 0%, #F0B90B 42%, #D8A400 74%, #7A4E00 100%);
         transform: translate(-50%, 0) scale(0);
-        animation: oilAnim-blobDrip 1.2s cubic-bezier(0.55, 0, 0.85, 0.4) forwards;
+        animation: oilAnim-blobDrip 1.3s cubic-bezier(0.55, 0, 0.85, 0.4) forwards;
       }
-      .oilAnim-blob-1 { left: 12%; width: 18px; height: 18px; animation-delay: 0.22s; }
-      .oilAnim-blob-2 { left: 30%; width: 24px; height: 24px; animation-delay: 0.30s; }
-      .oilAnim-blob-3 { left: 50%; width: 28px; height: 28px; animation-delay: 0.38s; }
-      .oilAnim-blob-4 { left: 70%; width: 22px; height: 22px; animation-delay: 0.32s; }
-      .oilAnim-blob-5 { left: 88%; width: 17px; height: 17px; animation-delay: 0.26s; }
+      .oilAnim-blob-1 { left: 8%;  width: 16px; height: 16px; animation-delay: 0.20s; }
+      .oilAnim-blob-2 { left: 22%; width: 22px; height: 22px; animation-delay: 0.45s; }
+      .oilAnim-blob-3 { left: 36%; width: 27px; height: 27px; animation-delay: 0.70s; }
+      .oilAnim-blob-4 { left: 50%; width: 30px; height: 30px; animation-delay: 0.95s; }
+      .oilAnim-blob-5 { left: 64%; width: 26px; height: 26px; animation-delay: 1.20s; }
+      .oilAnim-blob-6 { left: 78%; width: 23px; height: 23px; animation-delay: 1.45s; }
+      .oilAnim-blob-7 { left: 92%; width: 18px; height: 18px; animation-delay: 1.65s; }
+      .oilAnim-blob-8 { left: 15%; width: 15px; height: 15px; animation-delay: 1.85s; }
       @keyframes oilAnim-blobDrip {
         0%   { transform: translate(-50%, -8px) scale(0.15); opacity: 0; }
         14%  { opacity: 1; transform: translate(-50%, 0) scale(1); }
-        55%  { transform: translate(-50%, 58px) scale(1.1, 1.6); }
-        100% { transform: translate(-50%, 150px) scale(0.6, 2.6); opacity: 0; }
+        55%  { transform: translate(-50%, 70px) scale(1.1, 1.7); }
+        100% { transform: translate(-50%, 190px) scale(0.55, 2.8); opacity: 0; }
       }
       .oilAnim-shine {
         position: absolute;
@@ -331,7 +355,7 @@ function OilCanolaAnimationStyles() {
         background-position: 140% 0;
         mix-blend-mode: overlay;
         opacity: 0;
-        animation: oilAnim-shineSweep 0.9s ease-in-out 0.1s forwards;
+        animation: oilAnim-shineSweep 1.4s ease-in-out 0.1s 2;
       }
       @keyframes oilAnim-shineSweep {
         0%   { background-position: 140% 0; opacity: 0; }
@@ -349,11 +373,16 @@ function OilCanolaAnimationStyles() {
         background: radial-gradient(ellipse at center, rgba(138, 90, 0, 0.55) 0%, rgba(138, 90, 0, 0.18) 62%, transparent 80%);
         filter: blur(1.5px);
         transform: translateX(-50%) scale(0);
-        animation: oilAnim-puddleGrow 0.6s ease-out 0.5s forwards;
+        animation: oilAnim-puddleGrow 0.6s ease-out 0.5s forwards,
+                   oilAnim-puddlePulse 1.1s ease-in-out 1.1s infinite;
       }
       @keyframes oilAnim-puddleGrow {
         0%   { transform: translateX(-50%) scale(0); opacity: 0; }
         100% { transform: translateX(-50%) scale(16, 3.4); opacity: 1; }
+      }
+      @keyframes oilAnim-puddlePulse {
+        0%, 100% { transform: translateX(-50%) scale(16, 3.4); }
+        50%      { transform: translateX(-50%) scale(19, 3.8); }
       }
       @keyframes oilAnim-btnLabelFade {
         0%   { opacity: 1; transform: translateY(0); }
@@ -367,48 +396,65 @@ function OilCanolaAnimationStyles() {
         animation: oilAnim-btnLabelFade 0.4s ease forwards;
       }
 
-      /* Qty-repeat sheet: slides up from the bottom edge, boundary looks
-         dipped in oil (wavy amber band + hanging drip tails). */
-      @keyframes oilAnim-sheetSlideUp {
-        from { transform: translateY(100%); }
-        to   { transform: translateY(0); }
+      /* Order-Quantity popup — spawns from the bottom edge of the screen
+         and travels up to the page's vertical + horizontal center, framed
+         by the uploaded oil-splash image (its transparent middle filled
+         with a plain white panel that holds the real content). */
+      @keyframes oilAnim-modalSpawn {
+        0%   { transform: translate(-50%, 62vh) scale(0.8); opacity: 0; }
+        50%  { opacity: 1; }
+        100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
       }
-      @keyframes oilAnim-dripGrow {
-        0%   { transform: scaleY(0); opacity: 0; }
-        55%  { opacity: 1; }
-        100% { transform: scaleY(1); opacity: 1; }
-      }
-      .oilAnim-sheetOverlay {
+      .oilAnim-qtyCenterOverlay {
         position: fixed;
         inset: 0;
         background: rgba(11, 43, 91, 0.35);
-        display: flex;
-        align-items: flex-end;
-        justify-content: center;
         z-index: 2000;
-        padding: 0;
       }
-      .oilAnim-qtySheet {
+      .oilAnim-qtyCenterBox {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: min(92vw, 460px);
+        transform: translate(-50%, 62vh) scale(0.8);
+        opacity: 0;
+        animation: oilAnim-modalSpawn 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+      .oilAnim-qtyFrameWrap {
         position: relative;
         width: 100%;
-        max-width: 420px;
-        background: #fff;
-        padding: 30px 22px 22px;
-        box-shadow: 0 -12px 32px rgba(0,0,0,0.28);
-        animation: oilAnim-sheetSlideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
       }
-      .oilAnim-dripEdgeSvg {
+      .oilAnim-qtyWhiteFill {
         position: absolute;
-        top: -22px;
-        left: 0;
-        width: 100%;
-        height: 34px;
-        display: block;
-        overflow: visible;
+        left: 9%;
+        right: 12%;
+        top: 19%;
+        bottom: 23%;
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
       }
-      .oilAnim-dripTail {
-        transform-origin: top center;
-        animation: oilAnim-dripGrow 0.4s ease-out both;
+      .oilAnim-qtyFrameImg {
+        position: relative;
+        display: block;
+        width: 100%;
+        height: auto;
+        pointer-events: none;
+        user-select: none;
+      }
+      .oilAnim-qtyContent {
+        position: absolute;
+        left: 14%;
+        right: 17%;
+        top: 25%;
+        bottom: 29%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        gap: 10px;
+        overflow: auto;
       }
 
       .oilAnim-pageIn {
@@ -463,13 +509,17 @@ function OilCanolaAnimationStyles() {
         .oilAnim-bookBtnWrap:hover .oilAnim-driftPetal,
         .oilAnim-bookBtnWrap:active .oilAnim-clickRipple,
         .oilAnim-oilSheet,
+        .oilAnim-stream,
         .oilAnim-blob,
         .oilAnim-shine,
         .oilAnim-puddle,
-        .oilAnim-bookBtnWrap.oilAnim-melting .oilAnim-btnRealLabel,
-        .oilAnim-qtySheet,
-        .oilAnim-dripTail {
+        .oilAnim-bookBtnWrap.oilAnim-melting .oilAnim-btnRealLabel {
           animation: none !important;
+        }
+        .oilAnim-qtyCenterBox {
+          animation: none !important;
+          transform: translate(-50%, -50%) scale(1) !important;
+          opacity: 1 !important;
         }
       }
     `}</style>
@@ -648,52 +698,33 @@ function OilGooFilterDefs() {
 }
 
 // Rendered as a sibling over the Book/Update button only while `melting`
-// is true: a blurred sheet + five drip blobs, merged into one continuous
-// liquid mass by the goo filter above, grows out of the button and pours
-// downward as separate droplets — with a glossy gradient for volume, a
-// diagonal shine sweeping across like light on wet oil, and a soft puddle
-// shadow where it "lands". Purely visual (pointer-events: none); plays for
-// a fixed ~1.55s while the real submit is deferred, then the qty-repeat
-// sheet (or the update request) takes over.
+// is true: a blurred sheet, two continuously-looping "leak" streams, and
+// eight staggered drip blobs — all merged into one continuous liquid mass
+// by the goo filter above — pour downward off the button for the full 3s
+// window, with a glossy gradient for volume, a shine sweeping across
+// twice like light on wet oil, and a pulsing puddle shadow where it
+// "lands". Purely visual (pointer-events: none); plays for a fixed 3s
+// while the real submit is deferred, then the qty popup (or the update
+// request) takes over.
 function BookButtonMeltOverlay() {
   return (
     <div className="oilAnim-meltStage" aria-hidden="true">
       <div className="oilAnim-gooGroup">
         <div className="oilAnim-oilSheet" />
+        <div className="oilAnim-stream oilAnim-stream-1" />
+        <div className="oilAnim-stream oilAnim-stream-2" />
         <div className="oilAnim-blob oilAnim-blob-1" />
         <div className="oilAnim-blob oilAnim-blob-2" />
         <div className="oilAnim-blob oilAnim-blob-3" />
         <div className="oilAnim-blob oilAnim-blob-4" />
         <div className="oilAnim-blob oilAnim-blob-5" />
+        <div className="oilAnim-blob oilAnim-blob-6" />
+        <div className="oilAnim-blob oilAnim-blob-7" />
+        <div className="oilAnim-blob oilAnim-blob-8" />
       </div>
       <div className="oilAnim-shine" />
       <div className="oilAnim-puddle" />
     </div>
-  );
-}
-
-// The "dipped in oil" boundary used along the top edge of the qty-repeat
-// sheet: a wavy amber band with several hanging drip tails that grow in
-// just after the sheet slides up, so the sheet's edge reads as if it
-// emerged from a pool of oil rather than a plain straight border.
-function OilDripEdge() {
-  const dripX = [30, 92, 150, 210, 270, 330];
-  return (
-    <svg className="oilAnim-dripEdgeSvg" viewBox="0 0 400 40" preserveAspectRatio="none" aria-hidden="true">
-      <path
-        d="M0 20 C 20 4, 40 4, 55 20 C 68 34, 80 34, 92 18 C 104 4, 118 4, 132 20 C 146 36, 158 34, 170 16 C 182 2, 196 2, 210 18 C 224 34, 236 32, 248 16 C 260 2, 274 2, 288 18 C 300 32, 312 32, 324 16 C 336 2, 350 2, 362 18 C 374 32, 388 30, 400 18 L 400 40 L 0 40 Z"
-        fill="#D8A400"
-      />
-      {dripX.map((x, i) => (
-        <path
-          key={x}
-          className="oilAnim-dripTail"
-          style={{ animationDelay: `${0.35 + i * 0.09}s` }}
-          d={`M${x - 4} 16 Q ${x} 32, ${x} 40 Q ${x + 4} 32, ${x + 4} 16 Z`}
-          fill="#F0B90B"
-        />
-      ))}
-    </svg>
   );
 }
 
@@ -1069,9 +1100,9 @@ export default function BookPage() {
     }
 
     // Play the "button turns to oil and flows down" animation first, then
-    // move to the next step once it's had time to finish (~1.55s — the
-    // longest blob's drip animation is 0.38s delay + 1.2s duration). The
-    // button itself is disabled while bookBtnMelting is true (see the
+    // move to the next step once it's had a full 3s to play out (the
+    // continuous leak streams + 8 staggered drops run the whole window).
+    // The button itself is disabled while bookBtnMelting is true (see the
     // submit button's disabled prop below) so this can't be triggered twice.
     setBookBtnMelting(true);
     window.setTimeout(() => {
@@ -1080,7 +1111,7 @@ export default function BookPage() {
       } else {
         setShowQtyModal(true);
       }
-    }, 1580);
+    }, 3000);
   }
 
   async function bookOrders(copies: number) {
@@ -1728,40 +1759,46 @@ export default function BookPage() {
 
       {showQtyModal && (
         <div
-          className="oilAnim-sheetOverlay"
+          className="oilAnim-qtyCenterOverlay"
           onClick={() => {
             setShowQtyModal(false);
             setBookBtnMelting(false);
           }}
         >
-          <div className="oilAnim-qtySheet" onClick={(e) => e.stopPropagation()}>
-            <OilDripEdge />
-            <h2 style={{ fontSize: 17, margin: "0 0 4px", color: "#0b2b5b" }}>Order Quantity</h2>
-            <p style={{ fontSize: 14, color: "#666", margin: "0 0 16px", ...urduFont, textAlign: "right" }}>
-              اس ایک ہی آرڈر کے لیے کتنے بل بک کیے جائیں؟
-            </p>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {QTY_OPTIONS.map((n) => (
+          <div className="oilAnim-qtyCenterBox" onClick={(e) => e.stopPropagation()}>
+            <div className="oilAnim-qtyFrameWrap">
+              <div className="oilAnim-qtyWhiteFill" />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/oil-frame.png" alt="" className="oilAnim-qtyFrameImg" />
+              <div className="oilAnim-qtyContent">
+                <h2 style={{ fontSize: 16, margin: "0 0 4px", color: "#0b2b5b" }}>Order Quantity</h2>
+                <p style={{ fontSize: 13, color: "#666", margin: "0 0 10px", ...urduFont, textAlign: "center" }}>
+                  اس ایک ہی آرڈر کے لیے کتنے بل بک کیے جائیں؟
+                </p>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                  {QTY_OPTIONS.map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => bookOrders(n)}
+                      style={{ ...qtyOptionButtonStyle, flex: "0 1 50px", padding: "8px 0" }}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
                 <button
-                  key={n}
                   type="button"
-                  onClick={() => bookOrders(n)}
-                  style={qtyOptionButtonStyle}
+                  onClick={() => {
+                    setShowQtyModal(false);
+                    setBookBtnMelting(false);
+                  }}
+                  style={{ marginTop: 10, background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: 12 }}
                 >
-                  {n}
+                  Cancel
                 </button>
-              ))}
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                setShowQtyModal(false);
-                setBookBtnMelting(false);
-              }}
-              style={{ marginTop: 16, background: "none", border: "none", color: "#888", cursor: "pointer", fontSize: 13 }}
-            >
-              Cancel
-            </button>
           </div>
         </div>
       )}
