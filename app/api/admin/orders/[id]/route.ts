@@ -206,12 +206,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     patch.total_weight_kg = Math.round(totalWeightKg * 1000) / 1000;
   }
 
-  // Any real content change here (status, notes, town, or line items)
-  // counts as an edit worth flagging if it happens after the order was
-  // already exported — bump updated_at so the New Orders tab can detect
-  // that later, whether or not it's currently sitting past the export
-  // marker.
-  if (Object.keys(patch).length > 0) {
+  // Only a real edit via the booking/edit page — which always sends
+  // town_id, notes, and lines together — should ever flag an order as
+  // "Updated". A bare status-only patch (the quick dropdown on the
+  // Orders list, { status } with nothing else) must NOT bump this, or
+  // every ordinary status change right after an export would wrongly
+  // get tagged "Updated" too.
+  const isSubstantiveEdit = body.town_id !== undefined || body.notes !== undefined || Array.isArray(body.lines);
+  if (isSubstantiveEdit && Object.keys(patch).length > 0) {
     patch.updated_at = new Date().toISOString();
   }
 
