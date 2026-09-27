@@ -1,3 +1,4 @@
+// Destination: app/api/admin/orders/export-new/route.ts
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase";
 import { buildSoftCopyWorkbook, fetchWorkbookLookups } from "@/lib/ordersWorkbook";
@@ -30,6 +31,12 @@ export async function GET() {
 // newest order just exported. The marker lives in admin_settings (a
 // single row), not in the browser, so it's consistent across devices
 // and admins rather than per-browser/localStorage.
+//
+// Also stamps exported_at = now() on each exported order. That per-order
+// timestamp is what lets the admin UI later detect "this order was
+// edited after it was already sent out" (updated_at > exported_at) and
+// show it as "Updated" in the New Orders tab, independent of where the
+// global marker happens to sit at the time.
 //
 // Returns both files as separate base64 payloads in one JSON response —
 // NOT zipped together — so the client can trigger two independent
@@ -84,6 +91,21 @@ export async function POST() {
       .update({ last_order_export_at: newestCreatedAt })
       .eq("id", 1);
 
+    // Stamp exported_at on exactly the orders included in this export.
+    // If this fails, we don't fail the whole export (the PDF/xlsx are
+    // already built and about to download) — just warn, same as the
+    // marker-update failure below.
+    const exportedAt = new Date().toISOString();
+    const orderIds = orders.map((o) => o.id);
+    const { error: exportedAtError } = await supabaseServer
+      .from("orders")
+      .update({ exported_at: exportedAt })
+      .in("id", orderIds);
+
+    const warnings: string[] = [];
+    if (updateError) warnings.push("Failed to update last export marker — next export may repeat these orders");
+    if (exportedAtError) warnings.push("Failed to record export time on these orders — edits to them won't be flagged as Updated");
+
     return NextResponse.json({
       pdf: {
         filename: `Order Book - new-${orders.length}.pdf`,
@@ -93,7 +115,7 @@ export async function POST() {
         filename: `Soft copy - new-${orders.length}.xlsx`,
         base64: Buffer.from(xlsxBuffer).toString("base64"),
       },
-      markerWarning: updateError ? "Failed to update last export marker — next export may repeat these orders" : undefined,
+      markerWarning: warnings.length > 0 ? warnings.join(" ") : undefined,
     });
   } catch (err: any) {
     console.error("new orders export failed:", err);
