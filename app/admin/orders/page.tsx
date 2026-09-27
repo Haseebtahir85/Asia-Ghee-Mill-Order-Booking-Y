@@ -972,7 +972,7 @@ export default function AdminOrdersPage() {
             <input
               type="text"
               inputMode="numeric"
-              placeholder="e.g. 26090296"
+              placeholder="e.g. 000009"
               value={orderNumberFrom}
               onChange={(e) => setOrderNumberFrom(e.target.value)}
               style={{ ...filterInputStyle, width: 130 }}
@@ -984,7 +984,7 @@ export default function AdminOrdersPage() {
             <input
               type="text"
               inputMode="numeric"
-              placeholder="e.g. 26090298"
+              placeholder="e.g. 000001"
               value={orderNumberTo}
               onChange={(e) => setOrderNumberTo(e.target.value)}
               style={{ ...filterInputStyle, width: 130 }}
