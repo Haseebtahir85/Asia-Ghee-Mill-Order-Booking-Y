@@ -48,6 +48,7 @@ export interface Order {
   order_number: string;
   created_at: string;
   order_date: string;
+  customer_name: string | null;
   town_id: string | null;
   town: string | null;
   total_amount: number;
