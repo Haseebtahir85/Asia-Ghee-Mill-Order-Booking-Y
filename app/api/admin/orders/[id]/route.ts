@@ -36,9 +36,9 @@ export async function GET(_req: NextRequest, { params }: Params) {
 //    the normal edit path: update status/notes/town, and optionally
 //    replace the order's line items entirely (body.lines), recalculating
 //    total_amount/total_weight_kg. Any such real content change also
-//    bumps updated_at — this is what lets the admin UI later detect
-//    "this order was edited after it was already exported"
-//    (updated_at > exported_at) and show it as "Updated".
+//    bumps content_edited_at — this is what lets the admin UI later
+//    detect "this order was edited after it was already exported"
+//    (content_edited_at > exported_at) and show it as "Updated".
 //
 // Rate/weight handling (path 3, lines): an order's line items are a
 // PRICE SNAPSHOT taken at booking time and must never drift just
@@ -212,9 +212,17 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   // Orders list, { status } with nothing else) must NOT bump this, or
   // every ordinary status change right after an export would wrongly
   // get tagged "Updated" too.
+  //
+  // This writes content_edited_at, NOT a generic "updated_at" — if
+  // this table (like items/towns) has a trigger that auto-touches
+  // updated_at on every row update, that trigger would also fire the
+  // moment export-new stamps exported_at, making updated_at look newer
+  // than exported_at immediately on every export with no real edit
+  // involved. content_edited_at is written ONLY here, so nothing else
+  // in the system can accidentally bump it.
   const isSubstantiveEdit = body.town_id !== undefined || body.notes !== undefined || Array.isArray(body.lines);
   if (isSubstantiveEdit && Object.keys(patch).length > 0) {
-    patch.updated_at = new Date().toISOString();
+    patch.content_edited_at = new Date().toISOString();
   }
 
   delete patch.id;

@@ -393,9 +393,9 @@ function DateRangePicker({
 // the Done button. This is independent of the global export marker, so
 // it survives future "New Order" presses and only clears on Done.
 function isUpdatedSinceExport(o: Order): boolean {
-  if (!o.exported_at || !o.updated_at) return false;
-  if (o.updated_at <= o.exported_at) return false;
-  if (o.update_acknowledged_at && o.update_acknowledged_at >= o.updated_at) return false;
+  if (!o.exported_at || !o.content_edited_at) return false;
+  if (o.content_edited_at <= o.exported_at) return false;
+  if (o.update_acknowledged_at && o.update_acknowledged_at >= o.content_edited_at) return false;
   return true;
 }
 
@@ -532,6 +532,7 @@ export default function AdminOrdersPage() {
   const [deleting, setDeleting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [acknowledgingId, setAcknowledgingId] = useState<string | null>(null);
+  const [flaggingId, setFlaggingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -569,7 +570,7 @@ export default function AdminOrdersPage() {
   // Reads the "New Order" marker (admin_settings.last_order_export_at)
   // without touching it. Kept mainly for the export-new endpoint's own
   // bookkeeping; the New/Updated split on this page is driven by each
-  // order's own exported_at/updated_at/update_acknowledged_at.
+  // order's own exported_at/content_edited_at/update_acknowledged_at.
   async function loadMarker() {
     try {
       const res = await fetch("/api/admin/orders/export-new");
@@ -623,9 +624,10 @@ export default function AdminOrdersPage() {
   // An order counts as "brand new" if it was created after the last
   // time the "New Order" button was pressed (the admin_settings
   // marker) — this is the original behavior and needs no schema
-  // changes. Until exported_at/updated_at columns exist on `orders`,
-  // isUpdatedSinceExport() below always returns false, so it's a
-  // harmless no-op rather than something that can break this.
+  // changes. isUpdatedSinceExport() below depends on exported_at and
+  // content_edited_at existing on `orders` — until those columns are
+  // added it always returns false, a harmless no-op that can't break
+  // this brand-new detection.
   function isBrandNew(o: Order): boolean {
     return !lastExportAt || o.created_at > lastExportAt;
   }
@@ -635,7 +637,7 @@ export default function AdminOrdersPage() {
   // were exported before but have since been edited and not yet
   // acknowledged via Done.
   const newOrders = useMemo(() => {
-    return allOrders.filter((o) => isBrandNew(o) || isUpdatedSinceExport(o));
+    return allOrders.filter((o) => isBrandNew(o) || !!o.flagged_new_at || isUpdatedSinceExport(o));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allOrders, lastExportAt]);
 
@@ -662,11 +664,11 @@ export default function AdminOrdersPage() {
     });
   }, [tabOrders, statusFilter, townFilter, dateFrom, dateTo, orderNumberLow, orderNumberHigh]);
 
-  // On the New Orders tab, only brand-new orders can be selected,
-  // exported, or bulk-deleted — updated-since-export rows only get
-  // View/Done. On the All Orders tab everything remains selectable.
+  // On the New Orders tab, brand-new and manually-flagged orders can be
+  // selected, exported, or bulk-deleted — updated-since-export rows
+  // only get View/Done. On the All Orders tab everything is selectable.
   function isSelectable(o: Order): boolean {
-    return activeTab === "all" || isBrandNew(o);
+    return activeTab === "all" || isBrandNew(o) || !!o.flagged_new_at;
   }
 
   useEffect(() => {
@@ -713,6 +715,26 @@ export default function AdminOrdersPage() {
       });
     } finally {
       setAcknowledgingId(null);
+    }
+  }
+
+  // Manually pulls an order that isn't organically "new" (by the
+  // created_at marker) into the New Orders tab — e.g. an old order
+  // that needs another look — or removes it again. It behaves like a
+  // normal new-order row while flagged: full checkbox/export/edit/
+  // delete access, not the restricted "Updated" bucket.
+  async function toggleFlagNew(order: Order, flag: boolean) {
+    setFlaggingId(order.id);
+    const now = flag ? new Date().toISOString() : null;
+    setAllOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, flagged_new_at: now } : o)));
+    try {
+      await fetch(`/api/admin/orders/${order.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ flagNew: flag }),
+      });
+    } finally {
+      setFlaggingId(null);
     }
   }
 
@@ -972,7 +994,7 @@ export default function AdminOrdersPage() {
             <input
               type="text"
               inputMode="numeric"
-              placeholder="e.g. 000009"
+              placeholder="e.g. 26090296"
               value={orderNumberFrom}
               onChange={(e) => setOrderNumberFrom(e.target.value)}
               style={{ ...filterInputStyle, width: 130 }}
@@ -984,7 +1006,7 @@ export default function AdminOrdersPage() {
             <input
               type="text"
               inputMode="numeric"
-              placeholder="e.g. 000001"
+              placeholder="e.g. 26090298"
               value={orderNumberTo}
               onChange={(e) => setOrderNumberTo(e.target.value)}
               style={{ ...filterInputStyle, width: 130 }}
@@ -1153,6 +1175,15 @@ export default function AdminOrdersPage() {
                         >
                           Export
                         </button>
+                        {!isBrandNew(o) && (
+                          <button
+                            onClick={() => toggleFlagNew(o, !o.flagged_new_at)}
+                            disabled={flaggingId === o.id}
+                            style={{ ...editButtonStyle, background: "none", cursor: "pointer" }}
+                          >
+                            {flaggingId === o.id ? "..." : o.flagged_new_at ? "Remove from New" : "Add to New"}
+                          </button>
+                        )}
                         <button
                           onClick={() => deleteOne(o)}
                           disabled={deletingId === o.id}

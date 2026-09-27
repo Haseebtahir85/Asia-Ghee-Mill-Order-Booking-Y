@@ -1,3 +1,5 @@
+// Destination: lib/types.ts
+
 export type ItemType = "ghee" | "oil" | "other";
 export type OrderStatus = "pending" | "issue" | "done";
 export type IconKind = "tin" | "pack" | "bucket" | "bottle" | "soap";
@@ -56,8 +58,20 @@ export interface Order {
   status: OrderStatus;
   notes: string | null;
   exported_at: string | null;
-  updated_at: string;
+  // Set ONLY by the edit page's save path (town/notes/lines) — never by
+  // exporting, acknowledging, flagging, or a plain status change. Do
+  // NOT reuse a generic "updated_at" column for this: many tables
+  // (like Item/Town above) auto-touch updated_at on every row update
+  // via a trigger, which would make it fire the moment exported_at
+  // itself gets written — a dedicated field sidesteps that entirely.
+  content_edited_at: string | null;
   update_acknowledged_at: string | null;
+  // Manual override: when set, this order shows in the New Orders tab
+  // (with full checkbox/export/edit access) regardless of created_at
+  // vs. the last export marker. Set/cleared via the "Add to New" /
+  // "Remove from New" row button. Requires a matching DB column —
+  // see the note after this file.
+  flagged_new_at: string | null;
 }
 
 export interface OrderWithItems extends Order {
