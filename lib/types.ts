@@ -46,16 +46,16 @@ export interface OrderItem {
 export interface Order {
   id: string;
   order_number: string;
-  customer_name: string | null; // no longer collected by the /book page; may be null on new orders
-  town_id: string | null;
-  town: string | null; // snapshot of the town name at order time
-  status: OrderStatus;
+  created_at: string;
   order_date: string;
-  notes: string | null;
+  town_id: string | null;
+  town: string | null;
   total_amount: number;
   total_weight_kg: number;
-  created_at: string;
+  status: OrderStatus;
+  exported_at: string | null;
   updated_at: string;
+  update_acknowledged_at: string | null;
 }
 
 export interface OrderWithItems extends Order {
