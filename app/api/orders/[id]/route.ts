@@ -18,6 +18,14 @@ interface Params {
 // Rate/weight are always re-fetched fresh from the current catalog —
 // never trusted from the client — same pattern as the public booking
 // endpoint and the admin edit route.
+//
+// Every successful call here is, by definition, a real content edit —
+// unlike the admin PATCH route, there's no status-only or
+// acknowledge/flag branch on this public endpoint, so content_edited_at
+// is stamped unconditionally whenever the update succeeds. This is
+// what lets the admin's New Orders tab detect "a customer edited this
+// order after it was already exported" and show it as "Updated" —
+// same field, same detection logic, whichever side made the edit.
 export async function PATCH(req: NextRequest, { params }: Params) {
   const body = await req.json().catch(() => ({}));
   const orderNumber = String(body.order_number ?? "").trim();
@@ -84,6 +92,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const patch: Record<string, any> = {
     total_amount: Math.round(totalAmount * 100) / 100,
     total_weight_kg: Math.round(totalWeightKg * 1000) / 1000,
+    // Every successful edit through this endpoint is a real content
+    // change (quantities always change here, town may also change) —
+    // see the note above the function.
+    content_edited_at: new Date().toISOString(),
   };
 
   if (newTownId) {
