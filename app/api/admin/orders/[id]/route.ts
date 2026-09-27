@@ -24,23 +24,68 @@ export async function GET(_req: NextRequest, { params }: Params) {
   return NextResponse.json({ order });
 }
 
-// PATCH /api/admin/orders/:id — update status/notes/town, and optionally
-// replace the order's line items entirely (body.lines), recalculating
-// total_amount/total_weight_kg.
+// PATCH /api/admin/orders/:id — three distinct request shapes:
 //
-// Rate/weight handling: an order's line items are a PRICE SNAPSHOT taken
-// at booking time and must never drift just because the admin edits the
-// order later (e.g. to fix a qty, change status, or change town) — a
-// price change on the catalog should only ever affect orders placed
-// AFTER that change, never orders that already exist. So for any line
-// whose item_id was already part of this order, we reuse the rate and
-// weight_kg it already had — we do NOT re-fetch the item's current
-// catalog rate for it. Only a line whose item_id is genuinely new to
-// this order (the admin adding an item that wasn't on it before) gets
-// priced at the item's current catalog rate, exactly like a brand new
-// booking would.
+// 1. { acknowledgeUpdate: true } — dismisses the "Updated" badge on the
+//    New Orders tab (the admin pressed Done). Sets update_acknowledged_at
+//    only; nothing else on the order changes.
+// 2. { flagNew: true | false } — manually pulls this order into the New
+//    Orders tab (or removes it again) via the "Add to New" / "Remove
+//    from New" row button. Sets flagged_new_at only.
+// 3. Anything else (status/notes/town_id/lines, in any combination) —
+//    the normal edit path: update status/notes/town, and optionally
+//    replace the order's line items entirely (body.lines), recalculating
+//    total_amount/total_weight_kg. Any such real content change also
+//    bumps updated_at — this is what lets the admin UI later detect
+//    "this order was edited after it was already exported"
+//    (updated_at > exported_at) and show it as "Updated".
+//
+// Rate/weight handling (path 3, lines): an order's line items are a
+// PRICE SNAPSHOT taken at booking time and must never drift just
+// because the admin edits the order later (e.g. to fix a qty, change
+// status, or change town) — a price change on the catalog should only
+// ever affect orders placed AFTER that change, never orders that
+// already exist. So for any line whose item_id was already part of
+// this order, we reuse the rate and weight_kg it already had — we do
+// NOT re-fetch the item's current catalog rate for it. Only a line
+// whose item_id is genuinely new to this order (the admin adding an
+// item that wasn't on it before) gets priced at the item's current
+// catalog rate, exactly like a brand new booking would.
 export async function PATCH(req: NextRequest, { params }: Params) {
   const body = await req.json();
+
+  // --- One-off actions, handled separately from the edit path below ---
+
+  if (body.acknowledgeUpdate === true) {
+    const { data, error } = await supabaseServer
+      .from("orders")
+      .update({ update_acknowledged_at: new Date().toISOString() })
+      .eq("id", params.id)
+      .select("*, order_items(*)")
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ order: data });
+  }
+
+  if (body.flagNew !== undefined) {
+    const { data, error } = await supabaseServer
+      .from("orders")
+      .update({ flagged_new_at: body.flagNew ? new Date().toISOString() : null })
+      .eq("id", params.id)
+      .select("*, order_items(*)")
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json({ order: data });
+  }
+
+  // --- Normal edit path (status / notes / town_id / lines) ---
+
   const patch: Record<string, any> = {};
 
   if (body.status !== undefined) patch.status = body.status;
@@ -159,6 +204,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
     patch.total_amount = Math.round(totalAmount * 100) / 100;
     patch.total_weight_kg = Math.round(totalWeightKg * 1000) / 1000;
+  }
+
+  // Any real content change here (status, notes, town, or line items)
+  // counts as an edit worth flagging if it happens after the order was
+  // already exported — bump updated_at so the New Orders tab can detect
+  // that later, whether or not it's currently sitting past the export
+  // marker.
+  if (Object.keys(patch).length > 0) {
+    patch.updated_at = new Date().toISOString();
   }
 
   delete patch.id;
