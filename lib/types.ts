@@ -53,6 +53,7 @@ export interface Order {
   total_amount: number;
   total_weight_kg: number;
   status: OrderStatus;
+  notes: string | null;
   exported_at: string | null;
   updated_at: string;
   update_acknowledged_at: string | null;
