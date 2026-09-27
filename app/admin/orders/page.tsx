@@ -388,12 +388,6 @@ function DateRangePicker({
   );
 }
 
-// An order counts as "brand new" once it has never been included in a
-// New Order export.
-function isBrandNew(o: Order): boolean {
-  return !o.exported_at;
-}
-
 // An order counts as "updated" once it WAS already exported, but has
 // been edited since — and that edit hasn't been acknowledged yet via
 // the Done button. This is independent of the global export marker, so
@@ -626,13 +620,24 @@ export default function AdminOrdersPage() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [allOrders]);
 
-  // The New Orders tab's base list: orders never exported yet, PLUS
-  // orders that were exported before but have since been edited and
-  // not yet acknowledged via Done. A press of "New Order" only ever
-  // exports the first group and never touches the second.
+  // An order counts as "brand new" if it was created after the last
+  // time the "New Order" button was pressed (the admin_settings
+  // marker) — this is the original behavior and needs no schema
+  // changes. Until exported_at/updated_at columns exist on `orders`,
+  // isUpdatedSinceExport() below always returns false, so it's a
+  // harmless no-op rather than something that can break this.
+  function isBrandNew(o: Order): boolean {
+    return !lastExportAt || o.created_at > lastExportAt;
+  }
+
+  // The New Orders tab's base list: orders created after the last
+  // export marker, PLUS (once the backend supports it) orders that
+  // were exported before but have since been edited and not yet
+  // acknowledged via Done.
   const newOrders = useMemo(() => {
     return allOrders.filter((o) => isBrandNew(o) || isUpdatedSinceExport(o));
-  }, [allOrders]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allOrders, lastExportAt]);
 
   const tabOrders = activeTab === "new" ? newOrders : allOrders;
 
