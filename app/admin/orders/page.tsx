@@ -1,12 +1,18 @@
+// Destination: app/admin/orders/page.tsx
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Order, OrderStatus, Town } from "@/lib/types";
+import { useSyncedPolling } from "@/lib/useSyncedPolling";
 
 const NAVY = "#0b2b5b";
 const YELLOW = "#F6C90E";
 const RED = "#D62828";
+
+// Shared with app/admin/page.tsx — keep identical so both pages'
+// auto-refresh ticks land on the same wall-clock instant.
+const REFRESH_INTERVAL_MS = 10000;
 
 const STATUS_OPTIONS: { value: OrderStatus; label: string }[] = [
   { value: "pending", label: "Pending" },
@@ -19,6 +25,8 @@ const STATUS_STYLES: Record<OrderStatus, { color: string; background: string }> 
   issue: { color: RED, background: "#fdecec" },
   done: { color: "#1b8a3d", background: "#e6f4ea" },
 };
+
+const UPDATED_BADGE_STYLE = { color: NAVY, background: "#eef3fb" };
 
 type OrdersTab = "new" | "all";
 
@@ -380,6 +388,130 @@ function DateRangePicker({
   );
 }
 
+// An order counts as "brand new" once it has never been included in a
+// New Order export.
+function isBrandNew(o: Order): boolean {
+  return !o.exported_at;
+}
+
+// An order counts as "updated" once it WAS already exported, but has
+// been edited since — and that edit hasn't been acknowledged yet via
+// the Done button. This is independent of the global export marker, so
+// it survives future "New Order" presses and only clears on Done.
+function isUpdatedSinceExport(o: Order): boolean {
+  if (!o.exported_at || !o.updated_at) return false;
+  if (o.updated_at <= o.exported_at) return false;
+  if (o.update_acknowledged_at && o.update_acknowledged_at >= o.updated_at) return false;
+  return true;
+}
+
+type ExportChecks = { pdf: boolean; excel: boolean; summary: boolean };
+
+// Checkbox picker shown before any export: lets the admin choose which
+// file(s) to generate — Order Bills (PDF), the detailed Order Book
+// (Excel, includes each order's destination address), and/or the quick
+// filtered Summary (Excel) — and download only those, in one go.
+function ExportOptionsModal({
+  count,
+  checks,
+  onChange,
+  onCancel,
+  onConfirm,
+  busy,
+}: {
+  count: number;
+  checks: ExportChecks;
+  onChange: (next: ExportChecks) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+  busy: boolean;
+}) {
+  const noneChecked = !checks.pdf && !checks.excel && !checks.summary;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(11,43,91,0.35)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 50,
+      }}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
+    >
+      <div
+        style={{
+          background: "#fff",
+          borderRadius: 12,
+          border: `1px solid ${YELLOW}`,
+          padding: 20,
+          width: 320,
+          boxShadow: "0 12px 32px rgba(0,0,0,0.2)",
+        }}
+      >
+        <div style={{ fontSize: 15, fontWeight: 700, color: NAVY, marginBottom: 4 }}>Export Orders</div>
+        <div style={{ fontSize: 12, color: "#888", marginBottom: 14 }}>
+          {count} order{count === 1 ? "" : "s"} will be included
+        </div>
+
+        <label style={exportCheckRowStyle}>
+          <input
+            type="checkbox"
+            checked={checks.pdf}
+            onChange={(e) => onChange({ ...checks, pdf: e.target.checked })}
+          />
+          <span>
+            <div style={{ fontWeight: 600, fontSize: 13, color: "#222" }}>Order Bills (PDF)</div>
+            <div style={{ fontSize: 11, color: "#888" }}>Printable bill per order</div>
+          </span>
+        </label>
+
+        <label style={exportCheckRowStyle}>
+          <input
+            type="checkbox"
+            checked={checks.excel}
+            onChange={(e) => onChange({ ...checks, excel: e.target.checked })}
+          />
+          <span>
+            <div style={{ fontWeight: 600, fontSize: 13, color: "#222" }}>Order Book (Excel)</div>
+            <div style={{ fontSize: 11, color: "#888" }}>Full detail incl. destination address</div>
+          </span>
+        </label>
+
+        <label style={exportCheckRowStyle}>
+          <input
+            type="checkbox"
+            checked={checks.summary}
+            onChange={(e) => onChange({ ...checks, summary: e.target.checked })}
+          />
+          <span>
+            <div style={{ fontWeight: 600, fontSize: 13, color: "#222" }}>Quick Summary (Excel)</div>
+            <div style={{ fontSize: 11, color: "#888" }}>One row per order, totals only</div>
+          </span>
+        </label>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <button type="button" onClick={onCancel} style={secondaryButtonStyle}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy || noneChecked || count === 0}
+            style={buttonStyle}
+          >
+            {busy ? "Exporting..." : "Download"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AdminOrdersPage() {
   const [activeTab, setActiveTab] = useState<OrdersTab>("new");
   const [allOrders, setAllOrders] = useState<Order[]>([]);
@@ -395,20 +527,31 @@ export default function AdminOrdersPage() {
   // scoped to today's orders — the user can widen or clear it from there.
   const [dateFrom, setDateFrom] = useState<string>(() => todayInKarachi());
   const [dateTo, setDateTo] = useState<string>(() => todayInKarachi());
+  // Order-number range filter. The two fields don't need to be typed in
+  // low-to-high order — whichever is smaller is treated as the start
+  // and whichever is larger as the end, and both ends are inclusive.
+  const [orderNumberFrom, setOrderNumberFrom] = useState("");
+  const [orderNumberTo, setOrderNumberTo] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [exporting, setExporting] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [exportingNew, setExportingNew] = useState(false);
-  const [exportingSummary, setExportingSummary] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [acknowledgingId, setAcknowledgingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Export-picker modal state — opened by the single "Export" button,
+  // acting on either the current checkbox selection or (if nothing is
+  // selected) every order matching the current filters.
+  const [exportModalIds, setExportModalIds] = useState<string[] | null>(null);
+  const [exportChecks, setExportChecks] = useState<ExportChecks>({ pdf: true, excel: true, summary: false });
+  const [exportBusy, setExportBusy] = useState(false);
+
   // Refetches just the orders list — used after actions that change it
-  // (status update, export-new, delete) — without touching the marker
-  // or the page-level loading flag, so it never re-shows the loading
-  // skeleton for a routine refresh.
+  // (status update, export-new, delete, acknowledge) and by the synced
+  // background poll — without touching the page-level loading flag, so
+  // it never re-shows the loading skeleton for a routine refresh.
   async function loadOrders() {
     const res = await fetch("/api/admin/orders");
     const json = await res.json();
@@ -430,24 +573,22 @@ export default function AdminOrdersPage() {
   }
 
   // Reads the "New Order" marker (admin_settings.last_order_export_at)
-  // without touching it — this is what draws the line between the New
-  // Orders tab and the All Orders tab. Read-only GET on the same route
-  // the New Order button POSTs to.
+  // without touching it. Kept mainly for the export-new endpoint's own
+  // bookkeeping; the New/Updated split on this page is driven by each
+  // order's own exported_at/updated_at/update_acknowledged_at.
   async function loadMarker() {
     try {
       const res = await fetch("/api/admin/orders/export-new");
       const json = await res.json();
       setLastExportAt(json.lastExportAt ?? null);
     } catch {
-      // If this fails we just fall back to treating everything as new,
-      // which is the safe direction (nothing gets hidden).
+      // Non-fatal — see note above.
     }
   }
 
-  // Initial load fetches orders AND the marker together and only then
-  // clears the loading flag. Waiting on both before the first render
-  // means the New Orders tab shows its correct, already-filtered list
-  // right away — never a flash of every order before it narrows down.
+  // Initial load fetches orders, marker, and towns together and only
+  // then clears the loading flag, so the first render never flashes an
+  // unfiltered list before things settle.
   useEffect(() => {
     async function init() {
       setLoading(true);
@@ -456,6 +597,13 @@ export default function AdminOrdersPage() {
     }
     init();
   }, []);
+
+  // Background refresh, aligned to the same absolute 10s grid as the
+  // dashboard page (see lib/useSyncedPolling.ts) — selections and
+  // filters are untouched by this, only the order data updates.
+  const { refreshing, secondsLeft } = useSyncedPolling(REFRESH_INTERVAL_MS, async () => {
+    await Promise.all([loadOrders(), loadMarker()]);
+  });
 
   // Net amount = what the customer actually owes after their town's
   // discount — same figure the printed bill totals to, since the
@@ -478,15 +626,24 @@ export default function AdminOrdersPage() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [allOrders]);
 
-  // The New Orders tab's base list: orders created after the last time
-  // the New Order button was pressed (server-tracked marker). Until the
-  // marker exists (button never pressed), every order counts as new.
+  // The New Orders tab's base list: orders never exported yet, PLUS
+  // orders that were exported before but have since been edited and
+  // not yet acknowledged via Done. A press of "New Order" only ever
+  // exports the first group and never touches the second.
   const newOrders = useMemo(() => {
-    if (!lastExportAt) return allOrders;
-    return allOrders.filter((o) => o.created_at > lastExportAt);
-  }, [allOrders, lastExportAt]);
+    return allOrders.filter((o) => isBrandNew(o) || isUpdatedSinceExport(o));
+  }, [allOrders]);
 
   const tabOrders = activeTab === "new" ? newOrders : allOrders;
+
+  // Order-number range, normalized so it doesn't matter which field the
+  // smaller value was typed into.
+  const { orderNumberLow, orderNumberHigh } = useMemo(() => {
+    const a = orderNumberFrom.trim();
+    const b = orderNumberTo.trim();
+    if (a && b) return { orderNumberLow: a <= b ? a : b, orderNumberHigh: a <= b ? b : a };
+    return { orderNumberLow: a || null, orderNumberHigh: b || null };
+  }, [orderNumberFrom, orderNumberTo]);
 
   const filteredOrders = useMemo(() => {
     return tabOrders.filter((o) => {
@@ -494,13 +651,22 @@ export default function AdminOrdersPage() {
       if (townFilter && o.town_id !== townFilter) return false;
       if (dateFrom && o.order_date < dateFrom) return false;
       if (dateTo && o.order_date > dateTo) return false;
+      if (orderNumberLow && o.order_number < orderNumberLow) return false;
+      if (orderNumberHigh && o.order_number > orderNumberHigh) return false;
       return true;
     });
-  }, [tabOrders, statusFilter, townFilter, dateFrom, dateTo]);
+  }, [tabOrders, statusFilter, townFilter, dateFrom, dateTo, orderNumberLow, orderNumberHigh]);
+
+  // On the New Orders tab, only brand-new orders can be selected,
+  // exported, or bulk-deleted — updated-since-export rows only get
+  // View/Done. On the All Orders tab everything remains selectable.
+  function isSelectable(o: Order): boolean {
+    return activeTab === "all" || isBrandNew(o);
+  }
 
   useEffect(() => {
     setSelected(new Set());
-  }, [activeTab, statusFilter, townFilter, dateFrom, dateTo]);
+  }, [activeTab, statusFilter, townFilter, dateFrom, dateTo, orderNumberLow, orderNumberHigh]);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -512,7 +678,8 @@ export default function AdminOrdersPage() {
   }
 
   function toggleSelectAll() {
-    setSelected(selected.size === filteredOrders.length ? new Set() : new Set(filteredOrders.map((o) => o.id)));
+    const selectableOrders = filteredOrders.filter(isSelectable);
+    setSelected(selected.size === selectableOrders.length ? new Set() : new Set(selectableOrders.map((o) => o.id)));
   }
 
   async function updateStatus(id: string, status: OrderStatus) {
@@ -526,9 +693,26 @@ export default function AdminOrdersPage() {
     });
   }
 
+  // Marks an "Updated" row as reviewed — it drops out of the New
+  // Orders tab (and stays out, since this timestamp is only ever
+  // beaten by a fresh edit) without ever going through the export flow.
+  async function acknowledgeUpdate(order: Order) {
+    setAcknowledgingId(order.id);
+    const now = new Date().toISOString();
+    setAllOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, update_acknowledged_at: now } : o)));
+    try {
+      await fetch(`/api/admin/orders/${order.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ acknowledgeUpdate: true }),
+      });
+    } finally {
+      setAcknowledgingId(null);
+    }
+  }
+
   // Decodes a base64 payload into a Blob and triggers a browser download
-  // for it. Called twice per export — once for the PDF, once for the
-  // xlsx — since the two files are downloaded separately, not zipped.
+  // for it.
   function downloadBase64(filename: string, base64: string, mimeType: string) {
     const byteChars = atob(base64);
     const byteNumbers = new Array(byteChars.length);
@@ -544,74 +728,85 @@ export default function AdminOrdersPage() {
     window.URL.revokeObjectURL(url);
   }
 
-  async function exportOrders(ids: string[]) {
-    if (ids.length === 0) return;
-    setError(null);
-
-    const res = await fetch("/api/admin/orders/export", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids }),
-    });
-
-    const json = await res.json().catch(() => ({ error: "Export failed" }));
-
-    if (!res.ok) {
-      setError(json.error ?? "Export failed");
-      return;
-    }
-
-    downloadBase64(json.pdf.filename, json.pdf.base64, "application/pdf");
-    downloadBase64(json.xlsx.filename, json.xlsx.base64, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  // Opens the export picker for a single row.
+  function openExportForOne(order: Order) {
+    setExportChecks({ pdf: true, excel: true, summary: false });
+    setExportModalIds([order.id]);
   }
 
-  // Bulk export now only ever acts on a checked selection, matching
-  // deleteBulk — the button is only rendered once selected.size > 0
-  // (see the button markup below).
-  async function exportBulk() {
-    const ids = Array.from(selected);
-    if (ids.length === 0) return;
-    setExporting(true);
-    await exportOrders(ids);
-    setExporting(false);
+  // Opens the export picker for the current checkbox selection, or —
+  // if nothing is checked — every order matching the active filters.
+  function openExportForBulk() {
+    const ids = selected.size > 0 ? Array.from(selected) : filteredOrders.filter(isSelectable).map((o) => o.id);
+    setExportChecks({ pdf: true, excel: true, summary: false });
+    setExportModalIds(ids);
   }
 
-  // Summary export — driven entirely by the current filters (Status,
-  // Town, Date range), not by checkbox selection. Since the date range
-  // defaults to today, pressing this fresh downloads today's orders;
-  // whatever range the user picks afterward is what gets exported.
-  // Only the xlsx is downloaded here (no PDF) — this is the quick
-  // spreadsheet summary, not the full order-book export.
-  async function exportSummary() {
-    const ids = filteredOrders.map((o) => o.id);
+  // Runs whichever export(s) are checked against exportModalIds. PDF
+  // and Excel Order Book both come off the same /export call (the
+  // backend already builds both together); Quick Summary is a separate
+  // call so it's never generated unless asked for.
+  async function confirmExport() {
+    const ids = exportModalIds ?? [];
     if (ids.length === 0) return;
-    setExportingSummary(true);
+    setExportBusy(true);
     setError(null);
 
-    const res = await fetch("/api/admin/orders/export-summary", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids }),
-    });
+    try {
+      if (exportChecks.pdf || exportChecks.excel) {
+        const res = await fetch("/api/admin/orders/export", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        });
+        const json = await res.json().catch(() => ({ error: "Export failed" }));
+        if (!res.ok) {
+          setError(json.error ?? "Export failed");
+          return;
+        }
+        if (exportChecks.pdf) downloadBase64(json.pdf.filename, json.pdf.base64, "application/pdf");
+        if (exportChecks.excel) {
+          downloadBase64(
+            json.xlsx.filename,
+            json.xlsx.base64,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          );
+        }
+      }
 
-    const json = await res.json().catch(() => ({ error: "Export failed" }));
+      if (exportChecks.summary) {
+        const res = await fetch("/api/admin/orders/export-summary", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        });
+        const json = await res.json().catch(() => ({ error: "Export failed" }));
+        if (!res.ok) {
+          setError(json.error ?? "Export failed");
+          return;
+        }
+        downloadBase64(
+          json.xlsx.filename,
+          json.xlsx.base64,
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+      }
 
-    if (!res.ok) {
-      setError(json.error ?? "Export failed");
-      setExportingSummary(false);
-      return;
+      setExportModalIds(null);
+    } finally {
+      setExportBusy(false);
     }
-
-    downloadBase64(json.xlsx.filename, json.xlsx.base64, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    setExportingSummary(false);
   }
 
   async function exportOne(order: Order) {
-    setExportingId(order.id);
-    await exportOrders([order.id]);
-    setExportingId(null);
+    openExportForOne(order);
   }
 
+  // Only ever asks the backend for "New Order" — the backend is
+  // responsible for selecting orders where exported_at IS NULL,
+  // building the PDF/xlsx from exactly those, and then stamping
+  // exported_at on them. Orders sitting in the "Updated" bucket are
+  // never touched by this.
   async function exportNewOrders() {
     setExportingNew(true);
     setError(null);
@@ -636,17 +831,15 @@ export default function AdminOrdersPage() {
     downloadBase64(json.xlsx.filename, json.xlsx.base64, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
     setExportingNew(false);
-    // The marker just advanced server-side — reload it alongside the
-    // orders so the New Orders tab immediately drops what was just
-    // exported instead of showing it as new until the next refresh.
+    // exported_at just advanced server-side for the exported orders —
+    // reload so brand-new rows correctly flip out of the New tab (any
+    // row that was separately "Updated" is untouched by this).
     loadOrders();
     loadMarker();
   }
 
   // Shared delete call for both the single-row Delete button and the
-  // bulk Delete button — same endpoint either way, just a different
-  // ids array. On success, removed orders drop out of both the loaded
-  // list and the current selection immediately (no refetch needed).
+  // bulk Delete button.
   async function deleteOrders(ids: string[]) {
     if (ids.length === 0) return;
     setError(null);
@@ -696,10 +889,6 @@ export default function AdminOrdersPage() {
     setDeletingId(null);
   }
 
-  // Bulk delete now only ever acts on a checked selection — the button
-  // itself is only rendered once selected.size > 0 (see the button
-  // markup below), so there's no "delete everything filtered" fallback
-  // to guard against here anymore.
   async function deleteBulk() {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
@@ -710,11 +899,17 @@ export default function AdminOrdersPage() {
     setDeleting(false);
   }
 
+  const exportButtonCount =
+    selected.size > 0 ? selected.size : filteredOrders.filter(isSelectable).length;
+
   return (
     <main style={{ maxWidth: 1100, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif", background: "#fffdf5", minHeight: "100vh" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
         <div style={{ width: 6, height: 24, background: YELLOW, borderRadius: 3 }} />
         <h1 style={{ fontSize: 22, fontWeight: 700, color: NAVY, margin: 0 }}>Orders</h1>
+        <span style={{ fontSize: 11, color: "#999", marginLeft: 4 }}>
+          {refreshing ? "Refreshing…" : `Next refresh in ${secondsLeft}s`}
+        </span>
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -766,22 +961,52 @@ export default function AdminOrdersPage() {
           </div>
 
           <DateRangePicker from={dateFrom} to={dateTo} onChange={(f, t) => { setDateFrom(f); setDateTo(t); }} />
+
+          <div>
+            <label style={labelStyle}>Order # from</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="e.g. 26090296"
+              value={orderNumberFrom}
+              onChange={(e) => setOrderNumberFrom(e.target.value)}
+              style={{ ...filterInputStyle, width: 130 }}
+            />
+          </div>
+
+          <div>
+            <label style={labelStyle}>Order # to</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="e.g. 26090298"
+              value={orderNumberTo}
+              onChange={(e) => setOrderNumberTo(e.target.value)}
+              style={{ ...filterInputStyle, width: 130 }}
+            />
+          </div>
+
+          {(orderNumberFrom || orderNumberTo) && (
+            <button
+              type="button"
+              onClick={() => {
+                setOrderNumberFrom("");
+                setOrderNumberTo("");
+              }}
+              style={{ ...navButtonStyle, alignSelf: "center", fontSize: 12, color: "#888" }}
+            >
+              Clear range
+            </button>
+          )}
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button type="button" onClick={exportNewOrders} disabled={exportingNew} style={secondaryButtonStyle}>
             {exportingNew ? "Checking..." : "New Order"}
           </button>
-          {activeTab === "all" && (
-            <button type="button" onClick={exportSummary} disabled={exportingSummary || filteredOrders.length === 0} style={summaryButtonStyle}>
-              {exportingSummary ? "Exporting..." : "Summary"}
-            </button>
-          )}
-          {activeTab === "all" && selected.size > 0 && (
-            <button onClick={exportBulk} disabled={exporting} style={buttonStyle}>
-              {exporting ? "Exporting..." : `Export Selected (${selected.size})`}
-            </button>
-          )}
+          <button type="button" onClick={openExportForBulk} disabled={exportButtonCount === 0} style={buttonStyle}>
+            {selected.size > 0 ? `Export (${selected.size} selected)` : `Export (${exportButtonCount})`}
+          </button>
           {selected.size > 0 && (
             <button type="button" onClick={deleteBulk} disabled={deleting} style={deleteButtonStyle}>
               {deleting ? "Deleting..." : `Delete Selected (${selected.size})`}
@@ -813,7 +1038,16 @@ export default function AdminOrdersPage() {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ textAlign: "left", background: NAVY }}>
-              <th style={thStyle}><input type="checkbox" checked={selected.size === filteredOrders.length && filteredOrders.length > 0} onChange={toggleSelectAll} /></th>
+              <th style={thStyle}>
+                <input
+                  type="checkbox"
+                  checked={
+                    filteredOrders.filter(isSelectable).length > 0 &&
+                    selected.size === filteredOrders.filter(isSelectable).length
+                  }
+                  onChange={toggleSelectAll}
+                />
+              </th>
               <th style={thStyle}>Order #</th>
               <th style={thStyle}>Date &amp; Time</th>
               <th style={thStyle}>Town</th>
@@ -827,51 +1061,102 @@ export default function AdminOrdersPage() {
           <tbody>
             {filteredOrders.map((o) => {
               const statusStyle = STATUS_STYLES[o.status];
+              const updated = activeTab === "new" && isUpdatedSinceExport(o);
+
               return (
                 <tr key={o.id} style={{ borderBottom: "1px solid #f3e6b0" }}>
-                  <td style={tdStyle}><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleSelect(o.id)} /></td>
-                  <td style={{ ...tdStyle, fontWeight: 600, color: NAVY }}>{o.order_number}</td>
+                  <td style={tdStyle}>
+                    {updated ? null : (
+                      <input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleSelect(o.id)} />
+                    )}
+                  </td>
+                  <td style={{ ...tdStyle, fontWeight: 600, color: NAVY }}>
+                    {o.order_number}
+                    {updated && (
+                      <span
+                        style={{
+                          marginLeft: 8,
+                          padding: "2px 8px",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          borderRadius: 10,
+                          color: UPDATED_BADGE_STYLE.color,
+                          background: UPDATED_BADGE_STYLE.background,
+                        }}
+                      >
+                        Updated
+                      </span>
+                    )}
+                  </td>
                   <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>{formatDateTime(o.created_at)}</td>
                   <td style={tdStyle}>{o.town ?? ""}</td>
                   <td style={tdStyle}>{o.total_amount.toLocaleString()}</td>
                   <td style={tdStyle}>{Math.round(netAmount(o)).toLocaleString()}</td>
                   <td style={tdStyle}>{(o.total_weight_kg / 1000).toFixed(3)}</td>
                   <td style={tdStyle}>
-                    <select
-                      value={o.status}
-                      onChange={(e) => updateStatus(o.id, e.target.value as OrderStatus)}
-                      style={{
-                        padding: "4px 8px",
-                        fontSize: 12,
-                        fontWeight: 600,
-                        borderRadius: 12,
-                        border: "none",
-                        color: statusStyle.color,
-                        background: statusStyle.background,
-                        cursor: "pointer",
-                      }}
-                    >
-                      {STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                    </select>
+                    {updated ? (
+                      <span
+                        style={{
+                          padding: "4px 8px",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          borderRadius: 12,
+                          color: UPDATED_BADGE_STYLE.color,
+                          background: UPDATED_BADGE_STYLE.background,
+                        }}
+                      >
+                        Updated
+                      </span>
+                    ) : (
+                      <select
+                        value={o.status}
+                        onChange={(e) => updateStatus(o.id, e.target.value as OrderStatus)}
+                        style={{
+                          padding: "4px 8px",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          borderRadius: 12,
+                          border: "none",
+                          color: statusStyle.color,
+                          background: statusStyle.background,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                      </select>
+                    )}
                   </td>
                   <td style={tdStyle}>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <Link href={`/admin/orders/${o.id}/edit`} style={editButtonStyle}>Edit</Link>
-                      <button
-                        onClick={() => exportOne(o)}
-                        disabled={exportingId === o.id}
-                        style={{ ...editButtonStyle, background: "none", cursor: "pointer" }}
-                      >
-                        {exportingId === o.id ? "..." : "Export"}
-                      </button>
-                      <button
-                        onClick={() => deleteOne(o)}
-                        disabled={deletingId === o.id}
-                        style={deleteRowButtonStyle}
-                      >
-                        {deletingId === o.id ? "..." : "Delete"}
-                      </button>
-                    </div>
+                    {updated ? (
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <Link href={`/admin/orders/${o.id}/edit`} style={editButtonStyle}>View</Link>
+                        <button
+                          onClick={() => acknowledgeUpdate(o)}
+                          disabled={acknowledgingId === o.id}
+                          style={doneButtonStyle}
+                        >
+                          {acknowledgingId === o.id ? "..." : "Done"}
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <Link href={`/admin/orders/${o.id}/edit`} style={editButtonStyle}>Edit</Link>
+                        <button
+                          onClick={() => exportOne(o)}
+                          disabled={exportingId === o.id}
+                          style={{ ...editButtonStyle, background: "none", cursor: "pointer" }}
+                        >
+                          Export
+                        </button>
+                        <button
+                          onClick={() => deleteOne(o)}
+                          disabled={deletingId === o.id}
+                          style={deleteRowButtonStyle}
+                        >
+                          {deletingId === o.id ? "..." : "Delete"}
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               );
@@ -879,6 +1164,17 @@ export default function AdminOrdersPage() {
           </tbody>
         </table>
         </div>
+      )}
+
+      {exportModalIds && (
+        <ExportOptionsModal
+          count={exportModalIds.length}
+          checks={exportChecks}
+          onChange={setExportChecks}
+          onCancel={() => setExportModalIds(null)}
+          onConfirm={confirmExport}
+          busy={exportBusy}
+        />
       )}
     </main>
   );
@@ -926,23 +1222,6 @@ const secondaryButtonStyle: React.CSSProperties = {
   fontSize: 13,
 };
 
-// Solid yellow "Summary" button — the filter-driven quick xlsx export,
-// visually distinct from the navy Export/Delete actions since it acts
-// on the current filters rather than a checkbox selection.
-const summaryButtonStyle: React.CSSProperties = {
-  padding: "8px 16px",
-  background: YELLOW,
-  color: NAVY,
-  border: "none",
-  borderRadius: 6,
-  cursor: "pointer",
-  fontWeight: 700,
-  fontSize: 13,
-};
-
-// Red-filled bulk delete button, sitting next to the Export button so
-// it reads as the destructive counterpart of "Export All (filtered)" /
-// "Export Selected (n)" — same sizing, opposite weight.
 const deleteButtonStyle: React.CSSProperties = {
   padding: "8px 16px",
   background: RED,
@@ -965,8 +1244,6 @@ const editButtonStyle: React.CSSProperties = {
   textDecoration: "none",
 };
 
-// Red-filled per-row delete button, matching editButtonStyle's sizing
-// so it sits flush with the Edit / Export buttons in the row.
 const deleteRowButtonStyle: React.CSSProperties = {
   display: "inline-block",
   padding: "4px 12px",
@@ -979,9 +1256,18 @@ const deleteRowButtonStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
-// Tab pill styles — inactive tab is an outlined navy pill on the page's
-// cream background, active tab fills solid navy with a yellow accent
-// underline so it reads as "current", matching the rest of the theme.
+const doneButtonStyle: React.CSSProperties = {
+  display: "inline-block",
+  padding: "4px 12px",
+  fontSize: 12,
+  fontWeight: 600,
+  border: "1px solid #1b8a3d",
+  color: "#fff",
+  background: "#1b8a3d",
+  borderRadius: 6,
+  cursor: "pointer",
+};
+
 const tabButtonStyle: React.CSSProperties = {
   padding: "8px 18px",
   background: "#fff",
@@ -1002,3 +1288,11 @@ const tabButtonActiveStyle: React.CSSProperties = {
 
 const thStyle: React.CSSProperties = { padding: "9px 6px", fontSize: 13, color: "#fff", fontWeight: 700 };
 const tdStyle: React.CSSProperties = { padding: "8px 6px", fontSize: 13 };
+
+const exportCheckRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: 10,
+  padding: "8px 4px",
+  cursor: "pointer",
+};
