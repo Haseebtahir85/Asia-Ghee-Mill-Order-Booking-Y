@@ -1,4 +1,5 @@
 // Destination: lib/types.ts
+import type { StockCheckResult } from "@/lib/stockCheck";
 
 export type ItemType = "ghee" | "oil" | "other";
 export type OrderStatus = "pending" | "issue" | "done";
@@ -133,6 +134,8 @@ export interface SecondaryReport {
   to_id: string | null;
   to_name: string;
   created_at: string;
+  check_status?: string | null; // match | mismatch | partial | no_sheet | no_row
+  check_data?: StockCheckResult | null; // the comparison saved with the report
   secondary_report_lines?: SecondaryReportLine[];
 }
 

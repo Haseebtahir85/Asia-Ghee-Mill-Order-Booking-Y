@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase";
 import { loadSecondaryReportSettings } from "@/lib/secondaryReportServer";
+import { buildStockCheck, checkStatusOf } from "@/lib/stockCheckServer";
 import { ReportStage } from "@/lib/types";
 
 const STAGES: ReportStage[] = ["closing_opening", "secondary_sale", "closing_stock"];
@@ -152,6 +153,25 @@ export async function POST(req: NextRequest) {
     // don't leave a half-filed report behind (it would block a retry)
     await supabaseServer.from("secondary_reports").delete().eq("id", report.id);
     return NextResponse.json({ error: linesErr.message }, { status: 500 });
+  }
+
+  // Compare with the month's uploaded stock sheet and save the result with the
+  // report. This never blocks or fails the submission.
+  try {
+    const check = await buildStockCheck({
+      townId,
+      month: settings.month,
+      year: settings.year,
+      closing_opening: stageLines.closing_opening,
+      secondary_sale: stageLines.secondary_sale,
+      closing_stock: stageLines.closing_stock,
+    });
+    await supabaseServer
+      .from("secondary_reports")
+      .update({ check_status: checkStatusOf(check), check_data: check })
+      .eq("id", report.id);
+  } catch (err) {
+    console.error("stock check could not be saved", err);
   }
 
   return NextResponse.json({ report }, { status: 201 });

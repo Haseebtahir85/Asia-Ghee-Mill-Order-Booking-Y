@@ -4,6 +4,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReportStage, SecondaryReport, SecondaryReportLine, SecondaryReportSettingsInfo, Town, TOWithTowns } from "@/lib/types";
 import { MONTH_NAMES, monthLabel } from "@/lib/secondaryReport";
+import StockSheetCard from "./StockSheetCard";
+import StockCheckTable from "./StockCheckTable";
 
 const NAVY = "#0b2b5b";
 const YELLOW = "#F6C90E";
@@ -40,6 +42,36 @@ function stageWeight(report: SecondaryReport, stage: ReportStage): number {
 }
 
 // One row per item, with the qty/weight for each of the 3 stages side by side.
+function checkLabel(status: string | null | undefined): string {
+  switch (status) {
+    case "match":
+      return "Match";
+    case "mismatch":
+      return "Mismatch";
+    case "partial":
+      return "Waiting for other towns";
+    case "no_sheet":
+      return "No stock sheet";
+    case "no_row":
+      return "TO not in sheet";
+    default:
+      return "";
+  }
+}
+
+function CheckBadge({ status }: { status: string | null | undefined }) {
+  if (!status) return <span style={{ color: "#bbb" }}>—</span>;
+  const styles: Record<string, { color: string; bg: string; text: string }> = {
+    match: { color: "#1b8a3d", bg: "#e6f4ea", text: "✓ Match" },
+    mismatch: { color: "#d62828", bg: "#fdeaea", text: "✗ Mismatch" },
+  };
+  const s = styles[status];
+  if (!s) return <span style={{ color: "#999", fontSize: 12 }}>—</span>;
+  return (
+    <span style={{ fontSize: 12, fontWeight: 700, color: s.color, background: s.bg, borderRadius: 12, padding: "2px 9px" }}>{s.text}</span>
+  );
+}
+
 function buildItemMatrix(report: SecondaryReport) {
   const byKey = new Map<
     string,
@@ -203,6 +235,11 @@ export default function AdminSecondaryReportsPage() {
       "Closing/Opening Wt (kg)": Number(stageWeight(r, "closing_opening").toFixed(2)),
       "Secondary Sale Wt (kg)": Number(stageWeight(r, "secondary_sale").toFixed(2)),
       "Closing Stock Wt (kg)": Number(stageWeight(r, "closing_stock").toFixed(2)),
+      "Stock Check": checkLabel(r.check_status),
+      "Ghee Diff (t)": r.check_data?.diff ? r.check_data.diff.ghee : "",
+      "Oil Diff (t)": r.check_data?.diff ? r.check_data.diff.oil : "",
+      "RSO Diff (t)": r.check_data?.diff ? r.check_data.diff.rso : "",
+      "Total Diff (t)": r.check_data?.diff ? r.check_data.diff.total : "",
     }));
 
     const detailRows: Record<string, string | number>[] = [];
@@ -348,6 +385,8 @@ export default function AdminSecondaryReportsPage() {
                 </div>
               </div>
             </section>
+
+            <StockSheetCard month={config.month} year={config.year} />
           </div>
         )
       ) : (
@@ -402,7 +441,7 @@ export default function AdminSecondaryReportsPage() {
             <p style={{ color: "#666", fontSize: 14 }}>No reports filed for this selection.</p>
           ) : (
             <div style={{ overflowX: "auto", border: `1px solid ${YELLOW}`, borderRadius: 10, background: "#fff" }}>
-              <table style={{ width: "100%", minWidth: 760, borderCollapse: "collapse" }}>
+              <table style={{ width: "100%", minWidth: 840, borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ textAlign: "left", background: NAVY }}>
                     <th style={thStyle}>Sr#</th>
@@ -413,6 +452,7 @@ export default function AdminSecondaryReportsPage() {
                     <th style={{ ...thStyle, textAlign: "right" }}>Opening kg</th>
                     <th style={{ ...thStyle, textAlign: "right" }}>Sale kg</th>
                     <th style={{ ...thStyle, textAlign: "right" }}>Closing kg</th>
+                    <th style={thStyle}>Check</th>
                     <th style={thStyle}></th>
                   </tr>
                 </thead>
@@ -432,6 +472,9 @@ export default function AdminSecondaryReportsPage() {
                       </td>
                       <td style={{ ...tdStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                         {stageWeight(r, "closing_stock").toFixed(2)}
+                      </td>
+                      <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
+                        <CheckBadge status={r.check_status} />
                       </td>
                       <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
                         <button onClick={() => setViewing(r)} style={moveButtonStyle}>
@@ -495,6 +538,8 @@ function ReportDetailModal({
           <br />
           Filed {formatFiledAt(report.created_at)}
         </p>
+
+        <StockCheckTable check={report.check_data} />
 
         <div style={{ maxHeight: 420, overflow: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 14 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>

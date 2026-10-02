@@ -51,11 +51,31 @@ type ReportConfig = {
   filed_town_ids: string[];
 };
 
+// Totals in tons, and what /api/secondary-report/compare returns (the stock
+// sheet comparison shown on the last confirmation screen).
+type StockTons = { ghee: number; oil: number; rso: number; total: number };
+type StockCheck = {
+  available: boolean;
+  reason?: "no_sheet" | "no_row";
+  to_name: string;
+  complete: boolean;
+  remaining: number;
+  town: { opening: StockTons; secondary: StockTons; closing: StockTons };
+  to_total?: { opening: StockTons; primary: StockTons; secondary: StockTons; closing: StockTons };
+  expected?: StockTons;
+  diff?: StockTons;
+  ok?: { ghee: boolean; oil: boolean; rso: boolean; total: boolean };
+  status?: "match" | "mismatch";
+};
+
 // Urdu messages used by the TO's Secondary Ach. Report.
 const REPORT_NO_TO_MESSAGE = "اس ٹاؤن کے لیے کوئی ٹی او مقرر نہیں ہے۔ براہ کرم سیلز ٹیم سے رابطہ کریں۔";
 const REPORT_SELECT_TO_MESSAGE = "براہ کرم ٹی او منتخب کریں۔";
 const REPORT_SELECT_TOWN_MESSAGE = "براہ کرم ٹاؤن منتخب کریں۔";
 const REPORT_TO_NO_TOWNS_MESSAGE = "اس ٹی او کے لیے کوئی ٹاؤن مقرر نہیں ہے۔ براہ کرم سیلز ٹیم سے رابطہ کریں۔";
+const STOCK_MATCH_MESSAGE = "اسٹاک کا موازنہ درست ہے۔";
+const STOCK_MISMATCH_MESSAGE = "اسٹاک میں فرق پایا گیا ہے۔ براہ کرم اپنی رپورٹ دوبارہ چیک کر لیں۔";
+const STOCK_PARTIAL_MESSAGE = "اس ٹی او کے باقی ٹاؤنز کی رپورٹ جمع ہونے کے بعد اسٹاک کا موازنہ ہو گا۔";
 const REPORT_ALL_TOWNS_FILED_MESSAGE = "اس ٹی او کے تمام ٹاؤنز کی رپورٹس جمع ہو چکی ہیں۔";
 
 // Shown when an order is refused because its town no longer exists (the admin
@@ -309,6 +329,9 @@ export default function BookPage() {
   // Towns that already filed for the open month (from the server, plus the one
   // just filed). One report is filed per town, so a TO with 2 towns files twice.
   const [reportFiledIds, setReportFiledIds] = useState<string[]>([]);
+  // Stock comparison for the last confirmation screen (null = nothing to show).
+  const [reportCheck, setReportCheck] = useState<StockCheck | null>(null);
+  const [reportChecking, setReportChecking] = useState(false);
   const [showReportClosedModal, setShowReportClosedModal] = useState(false);
   // The click on "TO,s Secondary Ach. Report" first loads the admin's settings;
   // if that fails the reason is shown in a popup (never a silent no-op).
@@ -716,6 +739,7 @@ export default function BookPage() {
     setReportDone(false);
     setReportTownFiled(false);
     setReportReview(false);
+    setReportCheck(null);
     reportCheckRef.current = "";
   }
 
@@ -739,6 +763,7 @@ export default function BookPage() {
     setReportReview(false);
     setReportDone(false);
     setReportSubmitting(false);
+    setReportCheck(null);
     reportCheckRef.current = "";
     if (typeof window !== "undefined") window.scrollTo({ top: 0 });
 
@@ -955,9 +980,33 @@ export default function BookPage() {
 
   // "Submit" on the last page doesn't file anything yet — it opens the
   // results screen, where the user chooses Confirm or Cancel.
-  function openReportReview() {
+  async function openReportReview() {
     setReportError(null);
     if (!validateReportStep(2)) return;
+
+    // Ghee / Oil / RSO totals and, if the admin uploaded this month's stock
+    // sheet, the comparison with it. If this can't be loaded the screen simply
+    // shows without it — it never stops the report.
+    setReportChecking(true);
+    let check: StockCheck | null = null;
+    try {
+      const res = await fetch("/api/secondary-report/compare", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          town_id: reportTownId,
+          closing_opening: reportLinesForStep(0),
+          secondary_sale: reportLinesForStep(1),
+          closing_stock: reportLinesForStep(2),
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (res.ok && json) check = (json.result as StockCheck | null) ?? null;
+    } catch {
+      // no stock check this time
+    }
+    setReportCheck(check);
+    setReportChecking(false);
     setReportReview(true);
     if (typeof window !== "undefined") window.scrollTo({ top: 0 });
   }
@@ -1426,6 +1475,8 @@ export default function BookPage() {
             <ReportReviewSection key={step} title={stepTitles[step]} items={items} qtys={reportQtys[step] ?? {}} />
           ))}
 
+          {reportCheck && <ReportStockCheckCard check={reportCheck} />}
+
           {reportError && (
             <div
               className={styles.errorBanner}
@@ -1692,7 +1743,7 @@ export default function BookPage() {
               <button
                 type="button"
                 onClick={openReportReview}
-                disabled={loading || !!loadError || items.length === 0 || deviceTimeTampered}
+                disabled={loading || !!loadError || items.length === 0 || deviceTimeTampered || reportChecking}
                 className={styles.submitBtn}
                 style={{ width: "100%", display: "block", ...urduFont }}
               >
@@ -2425,6 +2476,114 @@ function ReportReviewSection({
         <span>Total Weight (Ton)</span>
         <strong>{(totalKg / 1000).toFixed(3)}</strong>
       </div>
+    </div>
+  );
+}
+
+// Last confirmation screen: Ghee / Oil / RSO totals (tons) and, when the admin
+// has uploaded this month's stock sheet, the same formula the sheet uses:
+//     Closing = Opening + Primary - Secondary
+// compared with the closing stock the TO reported.
+function ReportStockCheckCard({ check }: { check: StockCheck }) {
+  const fmt = (n: number) => n.toFixed(3);
+  const cols: { key: keyof StockTons; label: string }[] = [
+    { key: "ghee", label: "Ghee" },
+    { key: "oil", label: "Oil" },
+    { key: "rso", label: "RSO" },
+    { key: "total", label: "Total" },
+  ];
+  const full = check.available && check.complete && !!check.to_total && !!check.expected && !!check.diff && !!check.ok;
+
+  type Row = { label: string; values?: StockTons; emphasis?: boolean; diff?: boolean };
+  const rows: Row[] = full
+    ? [
+        { label: "Opening", values: check.to_total!.opening },
+        { label: "Primary", values: check.to_total!.primary },
+        { label: "Secondary", values: check.to_total!.secondary },
+        { label: "Closing (formula)", values: check.expected, emphasis: true },
+        { label: "Closing (reported)", values: check.to_total!.closing },
+        { label: "Difference", diff: true },
+      ]
+    : [
+        { label: "Opening", values: check.town.opening },
+        { label: "Secondary", values: check.town.secondary },
+        { label: "Closing", values: check.town.closing },
+      ];
+
+  const cell: React.CSSProperties = { padding: "5px 4px", textAlign: "right", fontVariantNumeric: "tabular-nums" };
+
+  return (
+    <div style={{ ...summaryCardStyle, marginTop: 10 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#0b2b5b", marginBottom: 2 }}>Stock Check (Tons)</div>
+      <div style={{ ...urduFont, fontSize: 12, color: "#666", marginBottom: 6 }}>
+        {full ? `${check.to_name} — تمام ٹاؤنز` : "اس ٹاؤن کا ٹوٹل"}
+      </div>
+
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
+        <colgroup>
+          <col style={{ width: "32%" }} />
+          <col style={{ width: "17%" }} />
+          <col style={{ width: "17%" }} />
+          <col style={{ width: "17%" }} />
+          <col style={{ width: "17%" }} />
+        </colgroup>
+        <thead>
+          <tr style={{ color: "#666", fontSize: 11 }}>
+            <th style={{ padding: "4px 4px", textAlign: "left", fontWeight: 600 }}></th>
+            {cols.map((c) => (
+              <th key={c.key} style={{ ...cell, fontWeight: 600 }}>
+                {c.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr
+              key={r.label}
+              style={{
+                borderTop: "1px solid #e6e9ef",
+                background: r.emphasis ? "#fff4e0" : undefined,
+                fontWeight: r.emphasis || r.diff ? 700 : 400,
+              }}
+            >
+              <td style={{ padding: "5px 4px", textAlign: "left", color: "#0b2b5b" }}>{r.label}</td>
+              {cols.map((c) => {
+                if (r.diff) {
+                  const good = check.ok![c.key];
+                  const d = check.diff![c.key];
+                  return (
+                    <td key={c.key} style={{ ...cell, color: good ? "#1b8a3d" : "#d62828" }}>
+                      {good ? "✓" : `${d > 0 ? "+" : "−"}${fmt(Math.abs(d))}`}
+                    </td>
+                  );
+                }
+                return (
+                  <td key={c.key} style={cell}>
+                    {fmt(r.values![c.key])}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {full && check.status === "match" && (
+        <div style={{ ...urduFont, marginTop: 8, padding: "6px 10px", borderRadius: 6, fontSize: 13, textAlign: "right", background: "#e6f4ea", color: "#1b8a3d" }}>
+          {STOCK_MATCH_MESSAGE}
+        </div>
+      )}
+      {full && check.status === "mismatch" && (
+        <div style={{ ...urduFont, marginTop: 8, padding: "6px 10px", borderRadius: 6, fontSize: 13, textAlign: "right", lineHeight: 1.9, background: "#fdeaea", color: "#d62828" }}>
+          {STOCK_MISMATCH_MESSAGE}
+        </div>
+      )}
+      {check.available && !check.complete && (
+        <div style={{ ...urduFont, marginTop: 8, fontSize: 12, color: "#555", textAlign: "right", lineHeight: 1.9 }}>
+          {STOCK_PARTIAL_MESSAGE} ({check.remaining})
+        </div>
+      )}
     </div>
   );
 }

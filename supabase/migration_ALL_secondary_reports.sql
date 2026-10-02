@@ -150,12 +150,49 @@ alter table secondary_reports enable row level security;
 alter table secondary_report_lines enable row level security;
 alter table secondary_report_settings enable row level security;
 
+-- ---- stock sheet (monthly Excel uploaded by the admin) + per-report stock check ----
+create table if not exists stock_sheets (
+  id uuid primary key default gen_random_uuid(),
+  report_month integer not null check (report_month between 1 and 12),
+  report_year integer not null,
+  file_name text,
+  uploaded_at timestamptz not null default now(),
+  constraint stock_sheets_period_unique unique (report_year, report_month)
+);
+
+create table if not exists stock_sheet_rows (
+  id uuid primary key default gen_random_uuid(),
+  sheet_id uuid not null references stock_sheets(id) on delete cascade,
+  row_no integer not null,
+  sheet_to_name text not null,
+  sheet_towns text,
+  to_id uuid references tos(id) on delete set null,
+  opening_ghee numeric, opening_oil numeric, opening_rso numeric,
+  primary_ghee numeric not null default 0,
+  primary_oil numeric not null default 0,
+  primary_rso numeric not null default 0,
+  secondary_ghee numeric, secondary_oil numeric, secondary_rso numeric,
+  closing_ghee numeric, closing_oil numeric, closing_rso numeric,
+  remarks text
+);
+
+create index if not exists stock_sheet_rows_sheet_idx on stock_sheet_rows (sheet_id);
+create index if not exists stock_sheet_rows_to_idx on stock_sheet_rows (to_id);
+
+alter table secondary_reports add column if not exists check_status text;
+alter table secondary_reports add column if not exists check_data jsonb;
+
+alter table stock_sheets enable row level security;
+alter table stock_sheet_rows enable row level security;
+
 -- ---- make Supabase's API notice the new tables right away ----
 notify pgrst, 'reload schema';
 
--- ---- result: this should list all 5 tables ----
+-- ---- result: this should list all 7 tables ----
 select to_regclass('public.tos') as tos,
        to_regclass('public.to_towns') as to_towns,
        to_regclass('public.secondary_reports') as secondary_reports,
        to_regclass('public.secondary_report_lines') as secondary_report_lines,
-       to_regclass('public.secondary_report_settings') as secondary_report_settings;
+       to_regclass('public.secondary_report_settings') as secondary_report_settings,
+       to_regclass('public.stock_sheets') as stock_sheets,
+       to_regclass('public.stock_sheet_rows') as stock_sheet_rows;
