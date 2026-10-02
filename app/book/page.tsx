@@ -272,6 +272,13 @@ export default function BookPage() {
   const reportTownBoxRef = useRef<HTMLDivElement>(null);
   const [reportToId, setReportToId] = useState("");
   const [reportToName, setReportToName] = useState("");
+  // TO's Name is a search field exactly like Town: what's typed, the matches,
+  // and whether the TO was filled in automatically from the chosen town.
+  const [reportToQuery, setReportToQuery] = useState("");
+  const [reportToSuggestions, setReportToSuggestions] = useState<{ id: string; name: string; townIds: string[] }[]>([]);
+  const [showReportToDropdown, setShowReportToDropdown] = useState(false);
+  const [reportToAuto, setReportToAuto] = useState(false);
+  const reportToBoxRef = useRef<HTMLDivElement>(null);
   const [reportQtys, setReportQtys] = useState<Record<string, string>[]>([{}, {}, {}]);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportSubmitting, setReportSubmitting] = useState(false);
@@ -470,6 +477,17 @@ export default function BookPage() {
     return () => document.removeEventListener("mousedown", handleClickOutsideReportTown);
   }, []);
 
+  // ...and the TO's Name field's own dropdown.
+  useEffect(() => {
+    function handleClickOutsideReportTo(e: MouseEvent) {
+      if (reportToBoxRef.current && !reportToBoxRef.current.contains(e.target as Node)) {
+        setShowReportToDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutsideReportTo);
+    return () => document.removeEventListener("mousedown", handleClickOutsideReportTo);
+  }, []);
+
   // Rate and per-unit weight are fetched but never rendered per-row anymore —
   // amount is still computed here (for the overall total) even though the
   // Amount column itself is hidden from the table. `kind` drives the icon,
@@ -589,11 +607,22 @@ export default function BookPage() {
 
   // ---- TO's Secondary Ach. Report handlers --------------------------------
 
-  // Active TO's from the admin's "TO's Names" list. A TO added to "all
-  // towns" (town_id = null) can file for any town.
+  // Active TO's, one entry per (TO, town). A TO can have many towns; a town
+  // has exactly one TO.
   const toList = reportConfig?.tos ?? [];
 
-  // The TO's the selected town can choose from (empty until a town is picked).
+  // Each TO once, with all of its town ids (what the TO's Name search lists).
+  const uniqueTos = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; townIds: string[] }>();
+    for (const r of reportConfig?.tos ?? []) {
+      const e = map.get(r.id);
+      if (e) e.townIds.push(r.town_id);
+      else map.set(r.id, { id: r.id, name: r.name, townIds: [r.town_id] });
+    }
+    return Array.from(map.values());
+  }, [reportConfig]);
+
+  // The TO of the selected town (empty until a town is picked).
   const reportCandidates = reportTownId ? tosForTown(toList, reportTownId) : [];
 
   async function fetchReportConfig(): Promise<SecondaryReportConfig | null> {
@@ -636,6 +665,10 @@ export default function BookPage() {
     setShowReportTownDropdown(false);
     setReportToId("");
     setReportToName("");
+    setReportToQuery("");
+    setReportToSuggestions([]);
+    setShowReportToDropdown(false);
+    setReportToAuto(false);
     setReportQtys([{}, {}, {}]);
     setReportError(null);
     setReportSubmitting(false);
@@ -656,8 +689,13 @@ export default function BookPage() {
     if (reportStep !== 0 || deviceTimeTampered) return;
     setReportTownQuery(value);
     setReportTownId("");
-    setReportToId("");
-    setReportToName("");
+    // a TO that was filled in from the old town goes away with it
+    if (reportToAuto) {
+      setReportToId("");
+      setReportToName("");
+      setReportToQuery("");
+      setReportToAuto(false);
+    }
     setReportTownFiled(false);
     setReportError(null);
     reportCheckRef.current = "";
@@ -666,22 +704,37 @@ export default function BookPage() {
       setShowReportTownDropdown(false);
       return;
     }
-    const matches = towns.filter((t) => townMatches(t, value.trim())).slice(0, 8);
+    // if a TO was picked first, only that TO's towns are offered
+    const allowed = reportToId ? uniqueTos.find((t) => t.id === reportToId)?.townIds ?? null : null;
+    const matches = towns
+      .filter((t) => townMatches(t, value.trim()) && (!allowed || allowed.includes(t.id)))
+      .slice(0, 8);
     setReportTownSuggestions(matches);
     setShowReportTownDropdown(true);
   }
 
   // Picking a town fills in its TO's Name and checks right away whether this
   // town has already filed for the month the admin has open.
-  async function selectReportTown(t: Town) {
+  // `manualTo` = the TO was picked by hand a moment ago (keep it as a manual pick).
+  async function selectReportTown(t: Town, manualTo = false) {
     if (reportStep !== 0 || deviceTimeTampered) return;
     setReportTownQuery(townLabel(t));
     setReportTownId(t.id);
-    // exactly one TO can file for this town -> fill it in; several -> the user picks
     const options = tosForTown(toList, t.id);
-    setReportToId(options.length === 1 ? options[0].id : "");
-    setReportToName(options.length === 1 ? options[0].name : "");
+    if (options.length > 0) {
+      const keepManual = manualTo || (reportToId === options[0].id && !reportToAuto);
+      setReportToId(options[0].id);
+      setReportToName(options[0].name);
+      setReportToQuery(options[0].name);
+      setReportToAuto(!keepManual);
+    } else {
+      setReportToId("");
+      setReportToName("");
+      setReportToQuery("");
+      setReportToAuto(false);
+    }
     setShowReportTownDropdown(false);
+    setShowReportToDropdown(false);
     setReportTownFiled(false);
     setReportError(options.length === 0 ? REPORT_NO_TO_MESSAGE : null);
     reportCheckRef.current = t.id;
@@ -703,12 +756,48 @@ export default function BookPage() {
     }
   }
 
-  function selectReportTo(id: string) {
+  // TO's Name search — same behavior as the Town search above.
+  function handleReportToChange(value: string) {
     if (reportStep !== 0 || deviceTimeTampered) return;
-    const to = reportCandidates.find((t) => t.id === id);
-    setReportToId(to?.id ?? "");
-    setReportToName(to?.name ?? "");
-    setReportError(null);
+    setReportToQuery(value);
+    setReportToId("");
+    setReportToName("");
+    setReportToAuto(false);
+    setReportError(reportTownFiled ? REPORT_ALREADY_FILED_MESSAGE : null);
+    if (!value.trim()) {
+      setReportToSuggestions([]);
+      setShowReportToDropdown(false);
+      return;
+    }
+    const q = value.trim().toLowerCase();
+    // if a town was picked first, only that town's TO is offered
+    const matches = uniqueTos
+      .filter((t) => t.name.toLowerCase().includes(q) && (!reportTownId || t.townIds.includes(reportTownId)))
+      .slice(0, 8);
+    setReportToSuggestions(matches);
+    setShowReportToDropdown(true);
+  }
+
+  function selectReportTo(to: { id: string; name: string; townIds: string[] }) {
+    if (reportStep !== 0 || deviceTimeTampered) return;
+    setReportToId(to.id);
+    setReportToName(to.name);
+    setReportToQuery(to.name);
+    setReportToAuto(false);
+    setShowReportToDropdown(false);
+
+    if (reportTownId && !to.townIds.includes(reportTownId)) {
+      // the chosen town isn't this TO's — start the town over
+      setReportTownId("");
+      setReportTownQuery("");
+      setReportTownFiled(false);
+      setReportError(null);
+      reportCheckRef.current = "";
+    } else if (!reportTownId && to.townIds.length === 1) {
+      // only one town to choose from -> fill it in
+      const t = towns.find((x) => x.id === to.townIds[0]);
+      if (t) selectReportTown(t, true);
+    }
   }
 
   function updateReportQty(step: number, itemId: string, value: string) {
@@ -742,7 +831,7 @@ export default function BookPage() {
         setReportError(REPORT_NO_TO_MESSAGE);
         return false;
       }
-      if (!reportToId) {
+      if (!reportToId || reportCandidates[0].id !== reportToId) {
         setReportError(REPORT_SELECT_TO_MESSAGE);
         return false;
       }
@@ -1331,32 +1420,40 @@ export default function BookPage() {
                 )}
               </div>
 
-              <div style={{ gridColumn: "1 / -1" }}>
+              <div style={{ gridColumn: "1 / -1", position: "relative", zIndex: 40 }} ref={reportToBoxRef}>
                 <label className={styles.fieldLabel}>TO&apos;s Name</label>
-                {reportStep === 0 && !deviceTimeTampered && reportCandidates.length > 1 ? (
-                  <select
-                    className={styles.select}
-                    style={{ width: "100%", ...urduFont, ...(fieldsLocked ? lockedFieldStyle : null) }}
-                    value={reportToId}
-                    onChange={(e) => selectReportTo(e.target.value)}
-                  >
-                    <option value="">ٹی او منتخب کریں</option>
-                    {reportCandidates.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
+                <div style={{ position: "relative" }}>
                   <input
                     className={styles.select}
                     style={{ width: "100%", ...urduFont, ...(fieldsLocked ? lockedFieldStyle : null) }}
-                    value={reportToName}
-                    readOnly
-                    aria-readonly
+                    placeholder="ٹی او تلاش کرنے کے لیے ٹائپ کریں..."
+                    value={reportToQuery}
+                    onChange={(e) => handleReportToChange(e.target.value)}
+                    onFocus={() => {
+                      if (fieldsLocked) return;
+                      if (reportToSuggestions.length > 0) setShowReportToDropdown(true);
+                    }}
+                    readOnly={fieldsLocked}
+                    aria-readonly={fieldsLocked}
                     autoComplete="off"
                   />
-                )}
+                  {!fieldsLocked && showReportToDropdown && reportToSuggestions.length > 0 && (
+                    <ul style={dropdownStyle}>
+                      {reportToSuggestions.map((t) => (
+                        <li key={t.id} onClick={() => selectReportTo(t)} style={dropdownItemStyle}>
+                          {t.name}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {!fieldsLocked && showReportToDropdown && reportToSuggestions.length === 0 && reportToQuery.trim() && (
+                    <ul style={dropdownStyle}>
+                      <li style={{ ...dropdownItemStyle, ...urduFont, color: "#888", cursor: "default" }}>
+                        کوئی ٹی او نہیں ملا۔
+                      </li>
+                    </ul>
+                  )}
+                </div>
               </div>
             </div>
           </div>
