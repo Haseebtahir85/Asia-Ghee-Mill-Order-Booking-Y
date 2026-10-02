@@ -87,3 +87,62 @@ export interface NewOrderInput {
     qty: number;
   }[];
 }
+
+// ---------------------------------------------------------------------------
+// TO's Secondary Ach. Report
+// ---------------------------------------------------------------------------
+
+// A TO (territory officer). A town belongs to at most one TO.
+export interface TO {
+  id: string;
+  name: string;
+  town_id: string;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// TO row as returned by /api/admin/tos (town name joined in).
+export interface TOWithTown extends TO {
+  town_name: string | null;
+}
+
+export type ReportStage = "closing_opening" | "secondary_sale" | "closing_stock";
+
+export interface SecondaryReportLine {
+  id: string;
+  report_id: string;
+  stage: ReportStage;
+  item_id: string | null;
+  item_name: string;
+  item_type: string;
+  item_sort: number;
+  weight_kg: number; // per unit, snapshot at filing time
+  qty: number;
+  weight_total_kg: number; // generated: qty * weight_kg
+  created_at: string;
+}
+
+export interface SecondaryReport {
+  id: string;
+  report_month: number; // month the admin selected (pages 2 + 3); page 1 is the month before
+  report_year: number;
+  town_id: string | null;
+  town_name: string;
+  to_id: string | null;
+  to_name: string;
+  created_at: string;
+  secondary_report_lines?: SecondaryReportLine[];
+}
+
+// What the public /book page reads from /api/secondary-report/config
+export interface SecondaryReportConfig {
+  enabled: boolean;
+  selected_month: number; // raw admin choice, 1-12
+  month: number; // period for pages 2 + 3
+  year: number;
+  prev_month: number; // period for page 1
+  prev_year: number;
+  tos: { id: string; name: string; town_id: string }[]; // active TOs only
+}
