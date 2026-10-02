@@ -593,13 +593,6 @@ export default function BookPage() {
   // towns" (town_id = null) can file for any town.
   const toList = reportConfig?.tos ?? [];
 
-  // Towns that have at least one TO who can file for them.
-  const reportTowns = useMemo(() => {
-    const list = reportConfig?.tos ?? [];
-    const anyTown = list.some((t) => t.town_id === null);
-    return towns.filter((t) => anyTown || list.some((x) => x.town_id === t.id));
-  }, [towns, reportConfig]);
-
   // The TO's the selected town can choose from (empty until a town is picked).
   const reportCandidates = reportTownId ? tosForTown(toList, reportTownId) : [];
 
@@ -673,7 +666,7 @@ export default function BookPage() {
       setShowReportTownDropdown(false);
       return;
     }
-    const matches = reportTowns.filter((t) => townMatches(t, value.trim())).slice(0, 8);
+    const matches = towns.filter((t) => townMatches(t, value.trim())).slice(0, 8);
     setReportTownSuggestions(matches);
     setShowReportTownDropdown(true);
   }
@@ -690,7 +683,7 @@ export default function BookPage() {
     setReportToName(options.length === 1 ? options[0].name : "");
     setShowReportTownDropdown(false);
     setReportTownFiled(false);
-    setReportError(null);
+    setReportError(options.length === 0 ? REPORT_NO_TO_MESSAGE : null);
     reportCheckRef.current = t.id;
 
     try {
@@ -1343,7 +1336,7 @@ export default function BookPage() {
                 {reportStep === 0 && !deviceTimeTampered && reportCandidates.length > 1 ? (
                   <select
                     className={styles.select}
-                    style={{ width: "100%", ...urduFont }}
+                    style={{ width: "100%", ...urduFont, ...(fieldsLocked ? lockedFieldStyle : null) }}
                     value={reportToId}
                     onChange={(e) => selectReportTo(e.target.value)}
                   >
@@ -1357,7 +1350,7 @@ export default function BookPage() {
                 ) : (
                   <input
                     className={styles.select}
-                    style={{ width: "100%", ...urduFont, ...lockedFieldStyle }}
+                    style={{ width: "100%", ...urduFont, ...(fieldsLocked ? lockedFieldStyle : null) }}
                     value={reportToName}
                     readOnly
                     aria-readonly
