@@ -6,24 +6,32 @@ import { addTownsToTo, cleanTownIds, conflictMessage, findTownConflicts } from "
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
 
-// GET /api/admin/tos — all TOs (active + inactive) with their towns, in sort order
+// GET /api/admin/tos — all TOs (active + inactive) with their towns, in sort order.
+// Three plain queries joined here (no embedded relationships).
 export async function GET() {
-  const { data, error } = await supabaseServer
-    .from("tos")
-    .select("*, to_towns(town_id, towns(name))")
-    .order("sort_order", { ascending: true });
+  const [tosRes, linksRes, townsRes] = await Promise.all([
+    supabaseServer.from("tos").select("*").order("sort_order", { ascending: true }),
+    supabaseServer.from("to_towns").select("to_id, town_id"),
+    supabaseServer.from("towns").select("id, name"),
+  ]);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  const failed = tosRes.error || linksRes.error || townsRes.error;
+  if (failed) {
+    return NextResponse.json({ error: failed.message }, { status: 500 });
   }
 
-  const tos = (data ?? []).map((row: any) => {
-    const { to_towns, ...rest } = row;
-    const towns = (to_towns ?? [])
-      .map((x: any) => ({ id: x.town_id, name: x.towns?.name ?? "" }))
-      .sort((a: any, b: any) => a.name.localeCompare(b.name));
-    return { ...rest, towns };
-  });
+  const townName = new Map((townsRes.data ?? []).map((t: any) => [t.id, t.name as string]));
+  const townsByTo = new Map<string, { id: string; name: string }[]>();
+  for (const l of linksRes.data ?? []) {
+    const list = townsByTo.get(l.to_id) ?? [];
+    list.push({ id: l.town_id, name: townName.get(l.town_id) ?? "" });
+    townsByTo.set(l.to_id, list);
+  }
+
+  const tos = (tosRes.data ?? []).map((to: any) => ({
+    ...to,
+    towns: (townsByTo.get(to.id) ?? []).sort((a, b) => a.name.localeCompare(b.name)),
+  }));
 
   return NextResponse.json({ tos });
 }

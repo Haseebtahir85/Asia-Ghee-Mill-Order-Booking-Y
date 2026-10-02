@@ -63,3 +63,8 @@ begin
 end $$;
 
 create unique index if not exists tos_name_uniq on tos (lower(name));
+
+-- Make Supabase's API notice the new table right away (without this the
+-- API can keep saying "Could not find the table 'public.to_towns' in the
+-- schema cache" until it refreshes by itself).
+notify pgrst, 'reload schema';

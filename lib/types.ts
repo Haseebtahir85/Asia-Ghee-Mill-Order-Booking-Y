@@ -148,5 +148,6 @@ export interface SecondaryReportSettingsInfo {
 
 // What the public /book page reads from /api/secondary-report/config
 export interface SecondaryReportConfig extends SecondaryReportSettingsInfo {
-  tos: { id: string; name: string; town_id: string }[]; // one entry per (active TO, town)
+  tos: { id: string; name: string; town_ids: string[] }[]; // every active TO with its towns
+  filed_town_ids: string[]; // towns that already filed for the open month
 }

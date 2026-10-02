@@ -2,6 +2,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase";
 
+// Always read live data from the database — never a copy frozen at build time
+// (otherwise a renamed/deleted town or a changed rate keeps showing the old value).
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
+
 // GET /api/admin/towns — all towns (active + inactive), in sort order
 export async function GET() {
   const { data, error } = await supabaseServer

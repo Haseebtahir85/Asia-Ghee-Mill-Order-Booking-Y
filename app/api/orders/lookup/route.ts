@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Town and Order ID are required" }, { status: 400 });
   }
 
-  const { data: order, error } = await supabaseServer
+  let { data: order, error } = await supabaseServer
     .from("orders")
     .select("*, order_items(*)")
     .eq("order_number", orderNumber)
@@ -25,6 +25,26 @@ export async function POST(req: NextRequest) {
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // The order stores the town's name as it was when the order was booked. If the
+  // admin has renamed that town since, the customer types the NEW name (it is
+  // what the dropdown shows), so also match through the town record itself.
+  if (!order) {
+    const { data: matchingTowns } = await supabaseServer.from("towns").select("id").ilike("name", town);
+    const townIds = (matchingTowns ?? []).map((t: any) => t.id);
+    if (townIds.length > 0) {
+      const retry = await supabaseServer
+        .from("orders")
+        .select("*, order_items(*)")
+        .eq("order_number", orderNumber)
+        .in("town_id", townIds)
+        .maybeSingle();
+      if (retry.error) {
+        return NextResponse.json({ error: retry.error.message }, { status: 500 });
+      }
+      order = retry.data;
+    }
   }
   if (!order) {
     return NextResponse.json({ error: "No order found for that Town and Order ID." }, { status: 404 });

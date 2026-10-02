@@ -39,14 +39,17 @@ export async function POST(req: NextRequest) {
   }
 
   // A town has at most one TO (to_towns.town_id is unique) and it must be active.
-  const { data: link } = await supabaseServer
-    .from("to_towns")
-    .select("to_id, tos!inner(id, name, is_active)")
-    .eq("town_id", townId)
-    .eq("tos.is_active", true)
-    .maybeSingle();
-
-  const to = link ? { id: (link as any).tos.id as string, name: (link as any).tos.name as string } : null;
+  // Two plain queries (no embedded relationship).
+  const { data: link } = await supabaseServer.from("to_towns").select("to_id").eq("town_id", townId).maybeSingle();
+  let to: { id: string; name: string } | null = null;
+  if (link) {
+    const { data: toRow } = await supabaseServer
+      .from("tos")
+      .select("id, name, is_active")
+      .eq("id", link.to_id)
+      .maybeSingle();
+    if (toRow && toRow.is_active) to = { id: toRow.id, name: toRow.name };
+  }
   if (!to) {
     return NextResponse.json({ error: "No TO is assigned to this town.", code: "NO_TO" }, { status: 400 });
   }

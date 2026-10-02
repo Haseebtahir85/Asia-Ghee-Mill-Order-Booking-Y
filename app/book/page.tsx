@@ -2,15 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Item, SecondaryReportConfig, Town } from "@/lib/types";
-import {
-  REPORT_ALREADY_FILED_MESSAGE,
-  REPORT_DISABLED_MESSAGE,
-  REPORT_NO_TO_MESSAGE,
-  REPORT_SELECT_TO_MESSAGE,
-  monthLabel,
-  tosForTown,
-} from "@/lib/secondaryReport";
+import { Item, Town } from "@/lib/types";
+import { REPORT_ALREADY_FILED_MESSAGE, REPORT_DISABLED_MESSAGE, monthLabel } from "@/lib/secondaryReport";
 import styles from "./book.module.css";
 
 // Jameel Noori Nastaleeq loads via next/font/local (see lib/fonts.ts) and is
@@ -42,6 +35,33 @@ const TOWN_LOCKED_MESSAGE = "ترمیم کے دوران ٹاؤن تبدیل نہ
 // "بلیک لسٹ ہو جائے گی" (not "... کر دیا جائے گا").
 const DEVICE_TIME_WARNING_MESSAGE =
   "براہ کرم سروس استعمال کرنے کے لیے اپنی ڈیوائس  کا وقت درست کریں، ورنہ آپ کی ڈیوائس بلیک لسٹ ہو جائے گی۔";
+
+// What /api/secondary-report/config returns. Kept here (not in lib/types.ts)
+// so this page doesn't depend on that file being in sync.
+type ReportConfig = {
+  enabled: boolean;
+  selected_month: number;
+  month: number;
+  year: number;
+  prev_month: number;
+  prev_year: number;
+  // every active TO (even one with no towns yet) with the ids of its towns
+  tos: { id: string; name: string; town_ids: string[] }[];
+  // towns that already filed for the month the admin has open
+  filed_town_ids: string[];
+};
+
+// Urdu messages used by the TO's Secondary Ach. Report.
+const REPORT_NO_TO_MESSAGE = "اس ٹاؤن کے لیے کوئی ٹی او مقرر نہیں ہے۔ براہ کرم سیلز ٹیم سے رابطہ کریں۔";
+const REPORT_SELECT_TO_MESSAGE = "براہ کرم ٹی او منتخب کریں۔";
+const REPORT_SELECT_TOWN_MESSAGE = "براہ کرم ٹاؤن منتخب کریں۔";
+const REPORT_TO_NO_TOWNS_MESSAGE = "اس ٹی او کے لیے کوئی ٹاؤن مقرر نہیں ہے۔ براہ کرم سیلز ٹیم سے رابطہ کریں۔";
+const REPORT_ALL_TOWNS_FILED_MESSAGE = "اس ٹی او کے تمام ٹاؤنز کی رپورٹس جمع ہو چکی ہیں۔";
+
+// Shown when an order is refused because its town no longer exists (the admin
+// renamed/replaced towns while this page was already open).
+const TOWN_LIST_UPDATED_MESSAGE = "ٹاؤن کی فہرست اپ ڈیٹ ہو گئی ہے۔ براہ کرم ٹاؤن دوبارہ منتخب کریں اور پھر کوشش کریں۔";
+const ORDER_TOWN_MISSING_MESSAGE = "اس آرڈر کا ٹاؤن اب موجود نہیں ہے۔ براہ کرم سیلز ٹیم سے رابطہ کریں۔";
 
 // True if the string contains Urdu/Arabic-script characters, so we only
 // apply the Urdu font to messages that are actually in Urdu.
@@ -275,7 +295,7 @@ export default function BookPage() {
   // TO's Name is a search field exactly like Town: what's typed, the matches,
   // and whether the TO was filled in automatically from the chosen town.
   const [reportToQuery, setReportToQuery] = useState("");
-  const [reportToSuggestions, setReportToSuggestions] = useState<{ id: string; name: string; townIds: string[] }[]>([]);
+  const [reportToSuggestions, setReportToSuggestions] = useState<{ id: string; name: string; town_ids: string[] }[]>([]);
   const [showReportToDropdown, setShowReportToDropdown] = useState(false);
   const [reportToAuto, setReportToAuto] = useState(false);
   const reportToBoxRef = useRef<HTMLDivElement>(null);
@@ -283,10 +303,17 @@ export default function BookPage() {
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [reportDone, setReportDone] = useState(false);
-  const [reportConfig, setReportConfig] = useState<SecondaryReportConfig | null>(null);
+  const [reportConfig, setReportConfig] = useState<ReportConfig | null>(null);
   const [reportTownFiled, setReportTownFiled] = useState(false);
   const [reportReview, setReportReview] = useState(false);
+  // Towns that already filed for the open month (from the server, plus the one
+  // just filed). One report is filed per town, so a TO with 2 towns files twice.
+  const [reportFiledIds, setReportFiledIds] = useState<string[]>([]);
   const [showReportClosedModal, setShowReportClosedModal] = useState(false);
+  // The click on "TO,s Secondary Ach. Report" first loads the admin's settings;
+  // if that fails the reason is shown in a popup (never a silent no-op).
+  const [reportOpening, setReportOpening] = useState(false);
+  const [reportLoadError, setReportLoadError] = useState<string | null>(null);
   // Latest town id whose "already filed?" check was started — lets a slow
   // response for a previously picked town be ignored.
   const reportCheckRef = useRef("");
@@ -418,7 +445,10 @@ export default function BookPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [itemsRes, townsRes] = await Promise.all([fetch("/api/items"), fetch("/api/towns")]);
+        const [itemsRes, townsRes] = await Promise.all([
+          fetch("/api/items", { cache: "no-store" }),
+          fetch("/api/towns", { cache: "no-store" }),
+        ]);
         const itemsJson = await itemsRes.json();
         const townsJson = await townsRes.json();
         if (!itemsRes.ok) throw new Error(itemsJson.error || `Items request failed (${itemsRes.status})`);
@@ -607,59 +637,65 @@ export default function BookPage() {
 
   // ---- TO's Secondary Ach. Report handlers --------------------------------
 
-  // Active TO's, one entry per (TO, town). A TO can have many towns; a town
-  // has exactly one TO.
-  // (entries without a town are ignored — the type guard also keeps this
-  // compiling if lib/types.ts still has the older "town_id may be null" type)
-  const toList = useMemo(
-    () => (reportConfig?.tos ?? []).filter((r): r is { id: string; name: string; town_id: string } => !!r.town_id),
-    [reportConfig]
-  );
+  // Every active TO from the admin's "TO's Names" list — including one that
+  // has no towns yet — so a saved name always shows up when it is searched.
+  const reportTos = useMemo(() => reportConfig?.tos ?? [], [reportConfig]);
 
-  // Each TO once, with all of its town ids (what the TO's Name search lists).
-  const uniqueTos = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; townIds: string[] }>();
-    for (const r of toList) {
-      const e = map.get(r.id);
-      if (e) e.townIds.push(r.town_id);
-      else map.set(r.id, { id: r.id, name: r.name, townIds: [r.town_id] });
-    }
-    return Array.from(map.values());
-  }, [toList]);
+  // Towns that already filed for the month the admin has open.
+  const filedSet = useMemo(() => new Set(reportFiledIds), [reportFiledIds]);
 
-  // The TO of the selected town (empty until a town is picked).
-  const reportCandidates = reportTownId ? tosForTown(toList, reportTownId) : [];
+  // town id -> its TO (a town has at most one TO)
+  const toOfTown = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    for (const t of reportTos) for (const tid of t.town_ids) map.set(tid, { id: t.id, name: t.name });
+    return map;
+  }, [reportTos]);
 
-  async function fetchReportConfig(): Promise<SecondaryReportConfig | null> {
+  // The picked TO and its towns (A–Z). A report is filed once per town.
+  const selectedTo = reportTos.find((t) => t.id === reportToId) ?? null;
+  const selectedToTowns = useMemo(() => {
+    if (!selectedTo) return [] as Town[];
+    return towns.filter((t) => selectedTo.town_ids.includes(t.id)).sort((a, b) => a.name.localeCompare(b.name));
+  }, [selectedTo, towns]);
+
+  async function fetchReportConfig(): Promise<{ config: ReportConfig | null; error: string | null }> {
     try {
-      const res = await fetch("/api/secondary-report/config", { cache: "no-store" });
-      if (!res.ok) return null;
-      const json = (await res.json()) as SecondaryReportConfig;
-      setReportConfig(json);
-      return json;
-    } catch {
-      return null;
+      const res = await fetch(`/api/secondary-report/config?t=${Date.now()}`, { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json) {
+        return { config: null, error: (json && json.error) || `Server error (${res.status})` };
+      }
+      const cfg = json as ReportConfig;
+      setReportConfig(cfg);
+      setReportFiledIds(cfg.filed_town_ids ?? []);
+      return { config: cfg, error: null };
+    } catch (err: any) {
+      return { config: null, error: `Network error: ${err?.message || "request failed"}` };
     }
   }
 
   async function openReport() {
-    if (deviceTimeTampered) return;
+    if (deviceTimeTampered || reportOpening) return;
+    setReportOpening(true);
+    try {
+      // Always re-read the admin's ON/OFF switch + month at the moment of opening.
+      const { config: cfg, error: loadErr } = await fetchReportConfig();
+      if (!cfg) {
+        setReportLoadError(loadErr ?? "Unknown error");
+        return;
+      }
+      if (!cfg.enabled) {
+        setShowReportClosedModal(true);
+        return;
+      }
 
-    // Always re-read the admin's ON/OFF switch + month at the moment of opening.
-    const cfg = await fetchReportConfig();
-    if (!cfg) {
-      setError("Couldn't load the report right now. Please check your connection and try again.");
-      return;
+      resetReport();
+      setError(null);
+      setReportMode(true);
+      if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+    } finally {
+      setReportOpening(false);
     }
-    if (!cfg.enabled) {
-      setShowReportClosedModal(true);
-      return;
-    }
-
-    resetReport();
-    setError(null);
-    setReportMode(true);
-    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
   }
 
   function resetReport() {
@@ -689,6 +725,87 @@ export default function BookPage() {
     if (typeof window !== "undefined") window.scrollTo({ top: 0 });
   }
 
+  // After a town is filed: back to the TO's remaining towns for the next report.
+  // The TO stays selected; the town, quantities and steps start over.
+  function nextTownForTo() {
+    setReportStep(0);
+    setReportTownId("");
+    setReportTownQuery("");
+    setReportTownSuggestions([]);
+    setShowReportTownDropdown(false);
+    setReportTownFiled(false);
+    setReportQtys([{}, {}, {}]);
+    setReportError(null);
+    setReportReview(false);
+    setReportDone(false);
+    setReportSubmitting(false);
+    reportCheckRef.current = "";
+    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+
+    // only one town left -> pick it for them
+    if (selectedTo) {
+      const pending = selectedTo.town_ids.filter((id) => !filedSet.has(id));
+      if (pending.length === 1) {
+        const t = towns.find((x) => x.id === pending[0]);
+        if (t) selectReportTown(t, true, true);
+      }
+    }
+  }
+
+  // TO's Name search: every active TO whose name matches (all of them when empty).
+  function suggestTos(query: string) {
+    const q = query.trim().toLowerCase();
+    return reportTos.filter((t) => !q || t.name.toLowerCase().includes(q)).slice(0, 20);
+  }
+
+  function handleReportToChange(value: string) {
+    if (reportStep !== 0 || deviceTimeTampered) return;
+    setReportToQuery(value);
+    setReportToId("");
+    setReportToName("");
+    setReportToAuto(false);
+    // changing the TO starts the town choice over
+    setReportTownId("");
+    setReportTownQuery("");
+    setReportTownSuggestions([]);
+    setShowReportTownDropdown(false);
+    setReportTownFiled(false);
+    setReportError(null);
+    reportCheckRef.current = "";
+    setReportToSuggestions(suggestTos(value));
+    setShowReportToDropdown(true);
+  }
+
+  function selectReportTo(to: { id: string; name: string; town_ids: string[] }) {
+    if (reportStep !== 0 || deviceTimeTampered) return;
+    setReportToId(to.id);
+    setReportToName(to.name);
+    setReportToQuery(to.name);
+    setReportToAuto(false);
+    setShowReportToDropdown(false);
+
+    // a new TO starts the town choice over
+    setReportTownId("");
+    setReportTownQuery("");
+    setReportTownSuggestions([]);
+    setShowReportTownDropdown(false);
+    setReportTownFiled(false);
+    reportCheckRef.current = "";
+
+    const pending = to.town_ids.filter((id) => !filedSet.has(id));
+    if (to.town_ids.length === 0) setReportError(REPORT_TO_NO_TOWNS_MESSAGE);
+    else if (pending.length === 0) setReportError(REPORT_ALL_TOWNS_FILED_MESSAGE);
+    else setReportError(null);
+
+    // exactly one town to file -> pick it for them
+    if (pending.length === 1) {
+      const t = towns.find((x) => x.id === pending[0]);
+      if (t) selectReportTown(t, true);
+    }
+  }
+
+  // Town search: only the picked TO's towns; if no TO is picked yet, any town
+  // that has a TO (picking one then fills in its TO).
   function handleReportTownChange(value: string) {
     // Town is only editable on step 1 — later steps reuse it.
     if (reportStep !== 0 || deviceTimeTampered) return;
@@ -709,28 +826,30 @@ export default function BookPage() {
       setShowReportTownDropdown(false);
       return;
     }
-    // if a TO was picked first, only that TO's towns are offered
-    const allowed = reportToId ? uniqueTos.find((t) => t.id === reportToId)?.townIds ?? null : null;
+    const allowed = selectedTo ? selectedTo.town_ids : null;
     const matches = towns
-      .filter((t) => townMatches(t, value.trim()) && (!allowed || allowed.includes(t.id)))
+      .filter((t) => townMatches(t, value.trim()) && (allowed ? allowed.includes(t.id) : toOfTown.has(t.id)))
       .slice(0, 8);
     setReportTownSuggestions(matches);
     setShowReportTownDropdown(true);
   }
 
-  // Picking a town fills in its TO's Name and checks right away whether this
-  // town has already filed for the month the admin has open.
-  // `manualTo` = the TO was picked by hand a moment ago (keep it as a manual pick).
-  async function selectReportTown(t: Town, manualTo = false) {
-    if (reportStep !== 0 || deviceTimeTampered) return;
+  // Picking a town (from the list below the TO, or by searching) fills in its
+  // TO if needed and checks whether this town has already filed this month.
+  // `manualTo` = the TO was picked by hand (keep it as a manual pick).
+  // `force` = called while the screen is still on its last step (the "next town"
+  // button), when the step is about to be reset to the first one anyway.
+  async function selectReportTown(t: Town, manualTo = false, force = false) {
+    if (deviceTimeTampered || (!force && reportStep !== 0)) return;
     setReportTownQuery(townLabel(t));
     setReportTownId(t.id);
-    const options = tosForTown(toList, t.id);
-    if (options.length > 0) {
-      const keepManual = manualTo || (reportToId === options[0].id && !reportToAuto);
-      setReportToId(options[0].id);
-      setReportToName(options[0].name);
-      setReportToQuery(options[0].name);
+
+    const owner = toOfTown.get(t.id);
+    if (owner) {
+      const keepManual = manualTo || (reportToId === owner.id && !reportToAuto);
+      setReportToId(owner.id);
+      setReportToName(owner.name);
+      setReportToQuery(owner.name);
       setReportToAuto(!keepManual);
     } else {
       setReportToId("");
@@ -738,11 +857,14 @@ export default function BookPage() {
       setReportToQuery("");
       setReportToAuto(false);
     }
+
     setShowReportTownDropdown(false);
     setShowReportToDropdown(false);
-    setReportTownFiled(false);
-    setReportError(options.length === 0 ? REPORT_NO_TO_MESSAGE : null);
+    const alreadyFiled = filedSet.has(t.id);
+    setReportTownFiled(alreadyFiled);
+    setReportError(!owner ? REPORT_NO_TO_MESSAGE : alreadyFiled ? REPORT_ALREADY_FILED_MESSAGE : null);
     reportCheckRef.current = t.id;
+    if (!owner || alreadyFiled) return;
 
     try {
       const res = await fetch(`/api/secondary-report/check?town_id=${encodeURIComponent(t.id)}`, {
@@ -753,55 +875,12 @@ export default function BookPage() {
       if (res.ok && json.filed) {
         setReportTownFiled(true);
         setReportError(REPORT_ALREADY_FILED_MESSAGE);
+        setReportFiledIds((prev) => (prev.includes(t.id) ? prev : [...prev, t.id]));
       } else if (res.ok && json.enabled === false) {
         setReportError(REPORT_DISABLED_MESSAGE);
       }
     } catch {
       // The server re-checks on submit, so a failed pre-check is harmless.
-    }
-  }
-
-  // TO's Name search — same behavior as the Town search above.
-  function handleReportToChange(value: string) {
-    if (reportStep !== 0 || deviceTimeTampered) return;
-    setReportToQuery(value);
-    setReportToId("");
-    setReportToName("");
-    setReportToAuto(false);
-    setReportError(reportTownFiled ? REPORT_ALREADY_FILED_MESSAGE : null);
-    if (!value.trim()) {
-      setReportToSuggestions([]);
-      setShowReportToDropdown(false);
-      return;
-    }
-    const q = value.trim().toLowerCase();
-    // if a town was picked first, only that town's TO is offered
-    const matches = uniqueTos
-      .filter((t) => t.name.toLowerCase().includes(q) && (!reportTownId || t.townIds.includes(reportTownId)))
-      .slice(0, 8);
-    setReportToSuggestions(matches);
-    setShowReportToDropdown(true);
-  }
-
-  function selectReportTo(to: { id: string; name: string; townIds: string[] }) {
-    if (reportStep !== 0 || deviceTimeTampered) return;
-    setReportToId(to.id);
-    setReportToName(to.name);
-    setReportToQuery(to.name);
-    setReportToAuto(false);
-    setShowReportToDropdown(false);
-
-    if (reportTownId && !to.townIds.includes(reportTownId)) {
-      // the chosen town isn't this TO's — start the town over
-      setReportTownId("");
-      setReportTownQuery("");
-      setReportTownFiled(false);
-      setReportError(null);
-      reportCheckRef.current = "";
-    } else if (!reportTownId && to.townIds.length === 1) {
-      // only one town to choose from -> fill it in
-      const t = towns.find((x) => x.id === to.townIds[0]);
-      if (t) selectReportTown(t, true);
     }
   }
 
@@ -828,19 +907,24 @@ export default function BookPage() {
       return false;
     }
     if (step === 0) {
-      if (!reportTownId) {
-        setReportError("براہ کرم ٹاؤن منتخب کریں۔");
-        return false;
-      }
-      if (reportCandidates.length === 0) {
-        setReportError(REPORT_NO_TO_MESSAGE);
-        return false;
-      }
-      if (!reportToId || reportCandidates[0].id !== reportToId) {
+      if (!reportToId) {
         setReportError(REPORT_SELECT_TO_MESSAGE);
         return false;
       }
-      if (reportTownFiled) {
+      if (!reportTownId) {
+        setReportError(REPORT_SELECT_TOWN_MESSAGE);
+        return false;
+      }
+      const owner = toOfTown.get(reportTownId);
+      if (!owner) {
+        setReportError(REPORT_NO_TO_MESSAGE);
+        return false;
+      }
+      if (owner.id !== reportToId) {
+        setReportError(REPORT_SELECT_TO_MESSAGE);
+        return false;
+      }
+      if (reportTownFiled || filedSet.has(reportTownId)) {
         setReportError(REPORT_ALREADY_FILED_MESSAGE);
         return false;
       }
@@ -908,6 +992,7 @@ export default function BookPage() {
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
         if (json.code === "ALREADY_FILED") {
+          setReportFiledIds((prev) => (prev.includes(reportTownId) ? prev : [...prev, reportTownId]));
           setReportTownFiled(true);
           setReportReview(false);
           setReportStep(0);
@@ -929,9 +1014,12 @@ export default function BookPage() {
         }
         throw new Error(json.error ?? "Failed to submit report");
       }
+      // this town is filed — the TO's list marks it, and the next town can start
+      setReportFiledIds((prev) => (prev.includes(reportTownId) ? prev : [...prev, reportTownId]));
       setReportReview(false);
       setReportDone(true);
       if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+      fetchReportConfig(); // refresh from the server in the background
     } catch (err: any) {
       setReportError(err.message || "Failed to submit report");
     } finally {
@@ -982,6 +1070,29 @@ export default function BookPage() {
     }
   }
 
+  // The town list on this page can be out of date (e.g. a town was renamed or
+  // replaced in the admin while the page was open). Reload it and ask the user
+  // to pick the town again, instead of leaving them stuck on an error.
+  async function recoverFromInvalidTown() {
+    if (editingOrder) {
+      // the town is locked to the order being edited — nothing to re-pick
+      setError(ORDER_TOWN_MISSING_MESSAGE);
+      return;
+    }
+    try {
+      const res = await fetch("/api/towns", { cache: "no-store" });
+      const json = await res.json();
+      if (res.ok) setTowns(json.towns ?? []);
+    } catch {
+      // keep the old list; the message below still tells the user what to do
+    }
+    setTownId("");
+    setTownQuery("");
+    setTownSuggestions([]);
+    setShowTownDropdown(false);
+    setError(TOWN_LIST_UPDATED_MESSAGE);
+  }
+
   async function bookOrders(copies: number) {
     // Belt-and-braces: same device-time check as handleFormSubmit, in case
     // the clock was tampered with after the qty modal was already open.
@@ -1027,7 +1138,8 @@ export default function BookPage() {
       setWasEdit(false);
       setConfirmedOrderNumbers(orderNumbers);
     } catch (err: any) {
-      setError(err.message || "Failed to submit order");
+      if (/selected town is invalid/i.test(err.message || "")) await recoverFromInvalidTown();
+      else setError(err.message || "Failed to submit order");
     } finally {
       setSubmitting(false);
     }
@@ -1068,7 +1180,8 @@ export default function BookPage() {
       setWasEdit(true);
       setConfirmedOrderNumbers([json.order.order_number]);
     } catch (err: any) {
-      setError(err.message || "Failed to update order");
+      if (/selected town is invalid/i.test(err.message || "")) await recoverFromInvalidTown();
+      else setError(err.message || "Failed to update order");
     } finally {
       setSubmitting(false);
     }
@@ -1242,18 +1355,35 @@ export default function BookPage() {
       `Closing Stock [${curLabel}]`,
     ];
     const fieldsLocked = reportStep > 0 || deviceTimeTampered;
+    // The items form shows once a town of the picked TO is chosen (and it hasn't filed yet).
+    const showForm = reportStep > 0 || (!!reportTownId && !reportTownFiled);
     const lockedFieldStyle: React.CSSProperties = { background: "#f1f3f7", color: "#555", cursor: "not-allowed" };
 
     if (reportDone) {
+      const remaining = selectedToTowns.filter((t) => !filedSet.has(t.id)).length;
       return statusScreen(
         <div className={styles.confirmCard}>
           <div className={styles.confirmIcon}>
             <CheckIcon />
           </div>
           <h1 style={{ fontSize: 21, margin: "0 0 8px", color: "#0b2b5b" }}>Report submitted</h1>
-          <p style={{ fontSize: 15, color: "#555", margin: 0 }}>
+          <p style={{ fontSize: 15, color: "#555", margin: 0, ...urduFont }}>
             {reportToName.trim()} — {reportTownQuery.trim()}
           </p>
+          {selectedToTowns.length > 1 && (
+            <p style={{ fontSize: 14, color: "#0b2b5b", margin: "8px 0 0", ...urduFont }}>
+              باقی ٹاؤنز: {remaining}
+            </p>
+          )}
+          {remaining > 0 && (
+            <button
+              className={styles.submitBtn}
+              onClick={nextTownForTo}
+              style={{ width: "100%", display: "block", marginTop: 14, ...urduFont }}
+            >
+              اگلے ٹاؤن کی رپورٹ
+            </button>
+          )}
           <button className={styles.secondaryBtn} onClick={exitReport}>
             Back to booking
           </button>
@@ -1374,13 +1504,92 @@ export default function BookPage() {
 
           <div className={styles.card} style={{ overflow: "visible", position: "relative", zIndex: 10 }}>
             <div className={styles.fieldGrid}>
-              <div style={{ gridColumn: "1 / -1", position: "relative", zIndex: 50 }} ref={reportTownBoxRef}>
+              {/* TO's Name — first */}
+              <div style={{ gridColumn: "1 / -1", position: "relative", zIndex: 50 }} ref={reportToBoxRef}>
                 <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-                  <label className={styles.fieldLabel}>Town</label>
+                  <label className={styles.fieldLabel}>TO&apos;s Name</label>
                   <span style={{ fontSize: 12, color: "#666", fontVariantNumeric: "tabular-nums" }}>
                     Current Time / Date: {pkTime}
                   </span>
                 </div>
+                <div style={{ position: "relative" }}>
+                  <input
+                    className={styles.select}
+                    style={{ width: "100%", ...urduFont, ...(fieldsLocked ? lockedFieldStyle : null) }}
+                    placeholder="ٹی او تلاش کرنے کے لیے ٹائپ کریں..."
+                    value={reportToQuery}
+                    onChange={(e) => handleReportToChange(e.target.value)}
+                    onFocus={() => {
+                      if (fieldsLocked) return;
+                      setReportToSuggestions(suggestTos(reportToQuery));
+                      setShowReportToDropdown(true);
+                    }}
+                    readOnly={fieldsLocked}
+                    aria-readonly={fieldsLocked}
+                    autoComplete="off"
+                  />
+                  {!fieldsLocked && showReportToDropdown && reportToSuggestions.length > 0 && (
+                    <ul style={dropdownStyle}>
+                      {reportToSuggestions.map((t) => (
+                        <li key={t.id} onClick={() => selectReportTo(t)} style={dropdownItemStyle}>
+                          {t.name}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {!fieldsLocked && showReportToDropdown && reportToSuggestions.length === 0 && (
+                    <ul style={dropdownStyle}>
+                      <li style={{ ...dropdownItemStyle, ...urduFont, color: "#888", cursor: "default" }}>
+                        کوئی ٹی او نہیں ملا۔
+                      </li>
+                    </ul>
+                  )}
+                </div>
+              </div>
+
+              {/* The picked TO's towns — one report is filed per town */}
+              {reportStep === 0 && selectedTo && selectedToTowns.length > 0 && (
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ ...urduFont, fontSize: 12, fontWeight: 700, color: "#0b2b5b" }}>اس ٹی او کے ٹاؤنز</span>
+                    <span style={{ ...urduFont, fontSize: 12, color: "#666", fontVariantNumeric: "tabular-nums" }}>
+                      جمع شدہ: {selectedToTowns.filter((t) => filedSet.has(t.id)).length} / {selectedToTowns.length}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {selectedToTowns.map((t) => {
+                      const filed = filedSet.has(t.id);
+                      const active = reportTownId === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          disabled={filed || deviceTimeTampered}
+                          onClick={() => selectReportTown(t, true)}
+                          style={{
+                            ...urduFont,
+                            padding: "6px 14px",
+                            borderRadius: 18,
+                            fontSize: 13,
+                            border: "1px solid",
+                            borderColor: active ? "#0b2b5b" : filed ? "#bfe3c8" : "#cddaf0",
+                            background: active ? "#0b2b5b" : filed ? "#e6f4ea" : "#fff",
+                            color: active ? "#fff" : filed ? "#1b8a3d" : "#0b2b5b",
+                            cursor: filed || deviceTimeTampered ? "default" : "pointer",
+                          }}
+                        >
+                          {filed ? "✓ " : ""}
+                          {townLabel(t)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Town — below */}
+              <div style={{ gridColumn: "1 / -1", position: "relative", zIndex: 40 }} ref={reportTownBoxRef}>
+                <label className={styles.fieldLabel}>Town</label>
                 <div style={{ position: "relative" }}>
                   <input
                     className={styles.select}
@@ -1424,46 +1633,10 @@ export default function BookPage() {
                   </div>
                 )}
               </div>
-
-              <div style={{ gridColumn: "1 / -1", position: "relative", zIndex: 40 }} ref={reportToBoxRef}>
-                <label className={styles.fieldLabel}>TO&apos;s Name</label>
-                <div style={{ position: "relative" }}>
-                  <input
-                    className={styles.select}
-                    style={{ width: "100%", ...urduFont, ...(fieldsLocked ? lockedFieldStyle : null) }}
-                    placeholder="ٹی او تلاش کرنے کے لیے ٹائپ کریں..."
-                    value={reportToQuery}
-                    onChange={(e) => handleReportToChange(e.target.value)}
-                    onFocus={() => {
-                      if (fieldsLocked) return;
-                      if (reportToSuggestions.length > 0) setShowReportToDropdown(true);
-                    }}
-                    readOnly={fieldsLocked}
-                    aria-readonly={fieldsLocked}
-                    autoComplete="off"
-                  />
-                  {!fieldsLocked && showReportToDropdown && reportToSuggestions.length > 0 && (
-                    <ul style={dropdownStyle}>
-                      {reportToSuggestions.map((t) => (
-                        <li key={t.id} onClick={() => selectReportTo(t)} style={dropdownItemStyle}>
-                          {t.name}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {!fieldsLocked && showReportToDropdown && reportToSuggestions.length === 0 && reportToQuery.trim() && (
-                    <ul style={dropdownStyle}>
-                      <li style={{ ...dropdownItemStyle, ...urduFont, color: "#888", cursor: "default" }}>
-                        کوئی ٹی او نہیں ملا۔
-                      </li>
-                    </ul>
-                  )}
-                </div>
-              </div>
             </div>
           </div>
 
-          {loading ? (
+          {!showForm ? null : loading ? (
             <div className={styles.stateCard}>
               <div className={styles.spinner} />
               Loading catalog...
@@ -1497,6 +1670,7 @@ export default function BookPage() {
             </div>
           )}
 
+          {showForm && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {reportStep < 2 ? (
               <button
@@ -1546,6 +1720,7 @@ export default function BookPage() {
               </button>
             )}
           </div>
+          )}
 
           <BrandFooter />
         </main>
@@ -1630,8 +1805,12 @@ export default function BookPage() {
         <button
           type="button"
           onClick={openReport}
-          disabled={deviceTimeTampered}
-          style={{ ...editOrderButtonStyle, ...(deviceTimeTampered ? { opacity: 0.5, cursor: "not-allowed" } : null) }}
+          disabled={deviceTimeTampered || reportOpening}
+          style={{
+            ...editOrderButtonStyle,
+            ...(deviceTimeTampered ? { opacity: 0.5, cursor: "not-allowed" } : null),
+            ...(reportOpening ? { opacity: 0.6, cursor: "wait" } : null),
+          }}
         >
           TO,s Secondary Ach. Report
         </button>
@@ -2002,6 +2181,21 @@ export default function BookPage() {
               onClick={() => setConflictModalNames(null)}
               style={qtyOptionButtonStyle}
             >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+      {reportLoadError && (
+        <div style={modalOverlayStyle} onClick={() => setReportLoadError(null)}>
+          <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
+            <p style={{ ...urduFont, fontSize: 15, color: "#d62828", margin: "0 0 10px", textAlign: "right", lineHeight: 1.7 }}>
+              رپورٹ اس وقت نہیں کھل سکی۔ براہ کرم کچھ دیر بعد دوبارہ کوشش کریں یا سیلز ٹیم سے رابطہ کریں۔
+            </p>
+            <p style={{ fontSize: 11, color: "#888", margin: "0 0 16px", wordBreak: "break-word", direction: "ltr", textAlign: "left" }}>
+              {reportLoadError}
+            </p>
+            <button type="button" onClick={() => setReportLoadError(null)} style={qtyOptionButtonStyle}>
               OK
             </button>
           </div>

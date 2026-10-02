@@ -10,17 +10,35 @@ export interface TownConflict {
 }
 
 // Which of these towns already belong to a TO (other than `excludeToId`)?
+// Plain queries only (no embedded joins), so this never depends on
+// Supabase's relationship/schema cache.
 export async function findTownConflicts(townIds: string[], excludeToId?: string): Promise<TownConflict[]> {
   if (townIds.length === 0) return [];
-  let query = supabaseServer.from("to_towns").select("town_id, to_id, tos(name), towns(name)").in("town_id", townIds);
+  let query = supabaseServer.from("to_towns").select("to_id, town_id").in("town_id", townIds);
   if (excludeToId) query = query.neq("to_id", excludeToId);
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return (data ?? []).map((r: any) => ({
-    town_id: r.town_id,
-    to_id: r.to_id,
-    town_name: r.towns?.name ?? "A town",
-    to_name: r.tos?.name ?? "another TO",
+
+  const links = data ?? [];
+  if (links.length === 0) return [];
+
+  const toIds = Array.from(new Set(links.map((l: any) => l.to_id)));
+  const conflictTownIds = Array.from(new Set(links.map((l: any) => l.town_id)));
+  const [toRes, townRes] = await Promise.all([
+    supabaseServer.from("tos").select("id, name").in("id", toIds),
+    supabaseServer.from("towns").select("id, name").in("id", conflictTownIds),
+  ]);
+  if (toRes.error) throw new Error(toRes.error.message);
+  if (townRes.error) throw new Error(townRes.error.message);
+
+  const toName = new Map((toRes.data ?? []).map((t: any) => [t.id, t.name]));
+  const townName = new Map((townRes.data ?? []).map((t: any) => [t.id, t.name]));
+
+  return links.map((l: any) => ({
+    town_id: l.town_id,
+    to_id: l.to_id,
+    town_name: townName.get(l.town_id) ?? "A town",
+    to_name: toName.get(l.to_id) ?? "another TO",
   }));
 }
 
