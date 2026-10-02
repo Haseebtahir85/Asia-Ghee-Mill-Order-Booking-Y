@@ -27,6 +27,10 @@ const WEIGHT_LIMIT_MESSAGE =
 // item quantities can be changed.
 const TOWN_LOCKED_MESSAGE = "ترمیم کے دوران ٹاؤن تبدیل نہیں کیا جا سکتا۔";
 
+// Shown under the Town / TO's Name fields on steps 2 and 3 of the TO's
+// Secondary Ach. Report — those two fields are carried over from step 1.
+const REPORT_FIELDS_LOCKED_MESSAGE = "ٹاؤن اور ٹی او کا نام پہلے مرحلے سے لیا گیا ہے۔";
+
 // Shared with every device-time-tampering guard (town search, every input
 // field, the Book/Update button, the Edit Order search) as well as the
 // full-screen DeviceTimeWarningOverlay, so the wording is identical
@@ -140,6 +144,31 @@ function getRemainingHoursMinutes(ms: number): { hours: number; minutes: number 
   return { hours: Math.floor(totalMinutes / 60), minutes: totalMinutes % 60 };
 }
 
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+// Previous + current month names (Pakistan calendar) for the TO's
+// Secondary Ach. Report headings. The previous month wraps correctly
+// across a year boundary (January -> December).
+function getReportMonthNames(ms: number): { previous: string; current: string } {
+  const { month } = getPakistanParts(ms);
+  const currentIdx = month - 1;
+  const previousIdx = (currentIdx + 11) % 12;
+  return { previous: MONTH_NAMES[previousIdx], current: MONTH_NAMES[currentIdx] };
+}
+
 // Icon is the admin's explicit choice (item.icon) when one is set.
 // Otherwise it's guessed from what the item is called — a plain
 // substring check, so it doesn't matter what comes before the
@@ -241,6 +270,26 @@ export default function BookPage() {
   const [editTownSuggestions, setEditTownSuggestions] = useState<Town[]>([]);
   const [showEditTownDropdown, setShowEditTownDropdown] = useState(false);
   const editTownBoxRef = useRef<HTMLDivElement>(null);
+
+  // "TO's Secondary Ach. Report" — a 3-step flow that reuses the same
+  // Town search + item table as the booking form:
+  //   step 0 -> Closing/Opening Report [Previous month]  (Town + TO's Name + items)
+  //   step 1 -> Secondary Sale [Current month]           (same Town + TO's Name, items)
+  //   step 2 -> Closing Stock [Current month]            (same Town + TO's Name, items)
+  // Each step keeps its own quantities in reportQtys[step]. Town + TO's
+  // Name are entered once on step 0 and stay locked for steps 1 and 2.
+  const [reportMode, setReportMode] = useState(false);
+  const [reportStep, setReportStep] = useState<0 | 1 | 2>(0);
+  const [reportTownId, setReportTownId] = useState("");
+  const [reportTownQuery, setReportTownQuery] = useState("");
+  const [reportTownSuggestions, setReportTownSuggestions] = useState<Town[]>([]);
+  const [showReportTownDropdown, setShowReportTownDropdown] = useState(false);
+  const reportTownBoxRef = useRef<HTMLDivElement>(null);
+  const [reportToName, setReportToName] = useState("");
+  const [reportQtys, setReportQtys] = useState<Record<string, string>[]>([{}, {}, {}]);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [reportDone, setReportDone] = useState(false);
 
   // Read-only Pakistan Standard Time clock (not derived from the device's local time zone)
   const [pkTime, setPkTime] = useState(getPakistanTimeString());
@@ -408,6 +457,18 @@ export default function BookPage() {
     return () => document.removeEventListener("mousedown", handleClickOutsideEditTown);
   }, []);
 
+  // And the TO's Secondary Ach. Report's own town field (separate ref,
+  // since it's a different part of the tree again).
+  useEffect(() => {
+    function handleClickOutsideReportTown(e: MouseEvent) {
+      if (reportTownBoxRef.current && !reportTownBoxRef.current.contains(e.target as Node)) {
+        setShowReportTownDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutsideReportTown);
+    return () => document.removeEventListener("mousedown", handleClickOutsideReportTown);
+  }, []);
+
   // Rate and per-unit weight are fetched but never rendered per-row anymore —
   // amount is still computed here (for the overall total) even though the
   // Amount column itself is hidden from the table. `kind` drives the icon,
@@ -523,6 +584,148 @@ export default function BookPage() {
     if (deviceTimeTampered) return;
     setEditSearchTown(townLabel(t));
     setShowEditTownDropdown(false);
+  }
+
+  // ---- TO's Secondary Ach. Report handlers --------------------------------
+
+  function openReport() {
+    if (deviceTimeTampered) return;
+    setReportMode(true);
+    setReportStep(0);
+    setReportError(null);
+    setReportDone(false);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+  }
+
+  function resetReport() {
+    setReportStep(0);
+    setReportTownId("");
+    setReportTownQuery("");
+    setReportTownSuggestions([]);
+    setShowReportTownDropdown(false);
+    setReportToName("");
+    setReportQtys([{}, {}, {}]);
+    setReportError(null);
+    setReportSubmitting(false);
+    setReportDone(false);
+  }
+
+  function exitReport() {
+    resetReport();
+    setReportMode(false);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+  }
+
+  function handleReportTownChange(value: string) {
+    // Town is only editable on step 1 — later steps reuse it.
+    if (reportStep !== 0 || deviceTimeTampered) return;
+    setReportTownQuery(value);
+    setReportTownId("");
+    if (!value.trim()) {
+      setReportTownSuggestions([]);
+      setShowReportTownDropdown(false);
+      return;
+    }
+    const matches = towns.filter((t) => townMatches(t, value)).slice(0, 8);
+    setReportTownSuggestions(matches);
+    setShowReportTownDropdown(true);
+  }
+
+  function selectReportTown(t: Town) {
+    if (reportStep !== 0 || deviceTimeTampered) return;
+    setReportTownQuery(townLabel(t));
+    setReportTownId(t.id);
+    setShowReportTownDropdown(false);
+  }
+
+  function updateReportQty(step: number, itemId: string, value: string) {
+    if (deviceTimeTampered) return;
+    setReportQtys((prev) => {
+      const next = prev.slice();
+      next[step] = { ...next[step], [itemId]: value };
+      return next;
+    });
+  }
+
+  function reportLinesForStep(step: number) {
+    const map = reportQtys[step] ?? {};
+    return items
+      .map((item) => ({ item_id: item.id, qty: parseFloat(map[item.id] || "0") || 0 }))
+      .filter((l) => l.qty > 0);
+  }
+
+  // Validates the current step; returns true if it's OK to move on.
+  function validateReportStep(step: number): boolean {
+    if (deviceTimeTampered) {
+      setReportError(DEVICE_TIME_WARNING_MESSAGE);
+      return false;
+    }
+    if (step === 0) {
+      if (!reportTownId) {
+        setReportError("براہ کرم ٹاؤن منتخب کریں۔");
+        return false;
+      }
+      if (!reportToName.trim()) {
+        setReportError("براہ کرم ٹی او کا نام درج کریں۔");
+        return false;
+      }
+    }
+    if (reportLinesForStep(step).length === 0) {
+      setReportError("کم از کم ایک آئٹم کی مقدار درج کریں۔");
+      return false;
+    }
+    return true;
+  }
+
+  function reportNext() {
+    setReportError(null);
+    if (!validateReportStep(reportStep)) return;
+    if (reportStep < 2) {
+      setReportStep((reportStep + 1) as 0 | 1 | 2);
+      if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+    }
+  }
+
+  function reportBack() {
+    setReportError(null);
+    if (reportStep > 0) {
+      setReportStep((reportStep - 1) as 0 | 1 | 2);
+      if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+    }
+  }
+
+  async function submitReport() {
+    setReportError(null);
+    if (!validateReportStep(2)) return;
+
+    const months = getReportMonthNames(nowCorrectedMs ?? Date.now());
+    setReportSubmitting(true);
+    try {
+      const res = await fetch("/api/secondary-reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          town_id: reportTownId,
+          town: reportTownQuery.trim(),
+          to_name: reportToName.trim(),
+          previous_month: months.previous,
+          current_month: months.current,
+          closing_opening: reportLinesForStep(0),
+          secondary_sale: reportLinesForStep(1),
+          closing_stock: reportLinesForStep(2),
+        }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({ error: "Failed to submit report" }));
+        throw new Error(json.error ?? "Failed to submit report");
+      }
+      setReportDone(true);
+      if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+    } catch (err: any) {
+      setReportError(err.message || "Failed to submit report");
+    } finally {
+      setReportSubmitting(false);
+    }
   }
 
   // Shared validation for both the "create new order" and "edit existing
@@ -780,6 +983,221 @@ export default function BookPage() {
     }
   }
 
+  // ---- TO's Secondary Ach. Report screen ----------------------------------
+  // Deliberately NOT gated by the 9am–6pm booking-hours overlay (it's a
+  // month-end report, not a booking) — only the device-time-tamper guard
+  // applies here.
+  if (reportMode) {
+    const months = getReportMonthNames(nowCorrectedMs ?? Date.now());
+    const stepTitles = [
+      `Closing/Opening Report [${months.previous}]`,
+      `Secondary Sale [${months.current}]`,
+      `Closing Stock [${months.current}]`,
+    ];
+    const fieldsLocked = reportStep > 0 || deviceTimeTampered;
+    const lockedFieldStyle: React.CSSProperties = { background: "#f1f3f7", color: "#555", cursor: "not-allowed" };
+
+    if (reportDone) {
+      return (
+        <div className={styles.page} style={{ overflowX: "hidden" }}>
+          <main className={styles.wrapper} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
+            <Header />
+            <div className={styles.confirmCard}>
+              <div className={styles.confirmIcon}>
+                <CheckIcon />
+              </div>
+              <h1 style={{ fontSize: 21, margin: "0 0 8px", color: "#0b2b5b" }}>Report submitted</h1>
+              <p style={{ fontSize: 15, color: "#555", margin: 0 }}>
+                {reportToName.trim()} — {reportTownQuery.trim()}
+              </p>
+              <button className={styles.secondaryBtn} onClick={exitReport}>
+                Back to booking
+              </button>
+            </div>
+          </main>
+          {deviceTimeTampered && <DeviceTimeWarningOverlay />}
+        </div>
+      );
+    }
+
+    return (
+      <div className={styles.page} style={{ overflowX: "hidden" }}>
+        <main className={styles.wrapper} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
+          <Header />
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <button
+              type="button"
+              onClick={exitReport}
+              style={editOrderButtonStyle}
+            >
+              ← Back to Booking
+            </button>
+            <span style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>Step {reportStep + 1} of 3</span>
+          </div>
+
+          <div
+            style={{
+              background: "#eef3fb",
+              border: "1px solid #cddaf0",
+              borderRadius: 8,
+              padding: "10px 12px",
+              marginBottom: 10,
+              fontSize: 15,
+              fontWeight: 700,
+              color: "#0b2b5b",
+              textAlign: "center",
+            }}
+          >
+            {stepTitles[reportStep]}
+          </div>
+
+          <div className={styles.card} style={{ overflow: "visible", position: "relative", zIndex: 10 }}>
+            <div className={styles.fieldGrid}>
+              <div style={{ gridColumn: "1 / -1", position: "relative", zIndex: 50 }} ref={reportTownBoxRef}>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+                  <label className={styles.fieldLabel}>Town</label>
+                  <span style={{ fontSize: 12, color: "#666", fontVariantNumeric: "tabular-nums" }}>
+                    Current Time / Date: {pkTime}
+                  </span>
+                </div>
+                <div style={{ position: "relative" }}>
+                  <input
+                    className={styles.select}
+                    style={{ width: "100%", ...urduFont, ...(fieldsLocked ? lockedFieldStyle : null) }}
+                    placeholder="ٹاؤن تلاش کرنے کے لیے ٹائپ کریں..."
+                    value={reportTownQuery}
+                    onChange={(e) => handleReportTownChange(e.target.value)}
+                    onFocus={() => {
+                      if (fieldsLocked) return;
+                      if (reportTownSuggestions.length > 0) setShowReportTownDropdown(true);
+                    }}
+                    readOnly={fieldsLocked}
+                    aria-readonly={fieldsLocked}
+                    autoComplete="off"
+                  />
+                  {!fieldsLocked && showReportTownDropdown && reportTownSuggestions.length > 0 && (
+                    <ul style={dropdownStyle}>
+                      {reportTownSuggestions.map((t) => (
+                        <li key={t.id} onClick={() => selectReportTown(t)} style={dropdownItemStyle}>
+                          {townLabel(t)}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label className={styles.fieldLabel}>TO&apos;s Name</label>
+                <input
+                  className={styles.select}
+                  style={{ width: "100%", ...urduFont, ...(fieldsLocked ? lockedFieldStyle : null) }}
+                  placeholder="ٹی او کا نام درج کریں..."
+                  value={reportToName}
+                  onChange={(e) => {
+                    if (fieldsLocked) return;
+                    setReportToName(e.target.value);
+                  }}
+                  readOnly={fieldsLocked}
+                  aria-readonly={fieldsLocked}
+                  autoComplete="off"
+                />
+                {reportStep > 0 && (
+                  <div style={{ fontSize: 11, color: "#888", marginTop: 4, ...urduFont, textAlign: "right" }}>
+                    {REPORT_FIELDS_LOCKED_MESSAGE}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className={styles.stateCard}>
+              <div className={styles.spinner} />
+              Loading catalog...
+            </div>
+          ) : loadError ? (
+            <div className={`${styles.stateCard} ${styles.errorState}`}>
+              Couldn&apos;t load the page: {loadError}. Try refreshing — if this keeps happening, the catalog may not
+              be set up yet.
+            </div>
+          ) : items.length === 0 ? (
+            <div className={`${styles.stateCard} ${styles.errorState}`}>
+              No items found in the catalog. Add items in the admin panel first.
+            </div>
+          ) : (
+            // key={reportStep} so each step gets a fresh table (and the row fade-in replays)
+            <ReportItemsTable
+              key={reportStep}
+              items={items}
+              qtys={reportQtys[reportStep] ?? {}}
+              onChange={(itemId, value) => updateReportQty(reportStep, itemId, value)}
+              disabled={deviceTimeTampered}
+            />
+          )}
+
+          {reportError && (
+            <div
+              className={styles.errorBanner}
+              style={isUrduText(reportError) ? { ...urduFont, textAlign: "right" } : undefined}
+            >
+              {reportError}
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {reportStep < 2 ? (
+              <button
+                type="button"
+                onClick={reportNext}
+                disabled={loading || !!loadError || items.length === 0 || deviceTimeTampered}
+                className={styles.submitBtn}
+                style={{ width: "100%", display: "block", ...urduFont }}
+              >
+                اگلا مرحلہ
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={submitReport}
+                disabled={reportSubmitting || loading || !!loadError || items.length === 0 || deviceTimeTampered}
+                className={styles.submitBtn}
+                style={{ width: "100%", display: "block", ...urduFont }}
+              >
+                {reportSubmitting ? "جمع ہو رہا ہے..." : "رپورٹ جمع کریں"}
+              </button>
+            )}
+
+            {reportStep > 0 && (
+              <button
+                type="button"
+                onClick={reportBack}
+                disabled={reportSubmitting}
+                style={{
+                  width: "100%",
+                  padding: "10px 0",
+                  background: "none",
+                  border: "1px solid #ccc",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  color: "#666",
+                  fontSize: 14,
+                  ...urduFont,
+                }}
+              >
+                پیچھے
+              </button>
+            )}
+          </div>
+
+          <BrandFooter />
+        </main>
+        {deviceTimeTampered && <DeviceTimeWarningOverlay />}
+      </div>
+    );
+  }
+
   if (confirmedOrderNumbers) {
     return (
       <div className={styles.page} style={{ overflowX: "hidden" }}>
@@ -852,7 +1270,15 @@ export default function BookPage() {
     <main className={styles.wrapper} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
       <Header />
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <button
+          type="button"
+          onClick={openReport}
+          disabled={deviceTimeTampered}
+          style={{ ...editOrderButtonStyle, ...(deviceTimeTampered ? { opacity: 0.5, cursor: "not-allowed" } : null) }}
+        >
+          TO,s Secondary Ach. Report
+        </button>
         <button
           type="button"
           onClick={() => !deviceTimeTampered && setShowEditSearch(true)}
@@ -1089,30 +1515,7 @@ export default function BookPage() {
         </button>
       </form>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 20, padding: "14px 0", fontSize: 12, color: "#888", lineHeight: 1.7 }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/sh-automate-logo.png"
-          alt="SH Automate"
-          style={{ width: 70, height: "auto", flexShrink: 0, opacity: 0.85 }}
-        />
-        <div style={{ textAlign: "left" }}>
-          <div>All Rights Reserved</div>
-          <div style={{ fontWeight: 600, color: "#555" }}>SH Automation</div>
-          <div>
-            Mail:{" "}
-            <a href="mailto:Haseebchaudhary8558@gmail.com" style={{ color: "#888" }}>
-              Haseebchaudhary8558@gmail.com
-            </a>
-          </div>
-          <div>
-            Contact:{" "}
-            <a href="tel:+923049657700" style={{ color: "#888" }}>
-              +92 304 9657700
-            </a>
-          </div>
-        </div>
-      </div>
+      <BrandFooter />
 
       {showEditSearch && (
         <div style={modalOverlayStyle} onClick={() => setShowEditSearch(false)}>
@@ -1270,6 +1673,167 @@ export default function BookPage() {
       ) : (
         bookingClosed && <BookingClosedOverlay remainingMs={closedRemainingMs} />
       )}
+    </div>
+  );
+}
+
+// Item table + weight summary used by every step of the TO's Secondary Ach.
+// Report. Same look and weight working as the booking form's table (Item /
+// Qty / Weight, group dividers, Ghee/Oil/RSO/SOAP stats, G.Total Weight),
+// minus the amount bar and the 10-ton / pack-family booking rules, which
+// don't apply to a report. Defined at module level (not inside BookPage) so
+// typing in a qty box doesn't remount the inputs and drop focus.
+function ReportItemsTable({
+  items,
+  qtys,
+  onChange,
+  disabled,
+}: {
+  items: Item[];
+  qtys: Record<string, string>;
+  onChange: (itemId: string, value: string) => void;
+  disabled: boolean;
+}) {
+  const rows = items.map((item) => {
+    const qty = parseFloat(qtys[item.id] || "0") || 0;
+    const weight = qty * item.weight_kg;
+    return { item, qty, weight, kind: getIconKind(item) };
+  });
+
+  let totalWeight = 0;
+  let gheeWeight = 0;
+  let oilWeight = 0;
+  let rsoWeight = 0;
+  let soapWeight = 0;
+  for (const r of rows) {
+    totalWeight += r.weight;
+    if (r.item.type === "ghee") gheeWeight += r.weight;
+    if (r.item.type === "oil") oilWeight += r.weight;
+    if (r.kind === "bottle") rsoWeight += r.weight;
+    if (r.kind === "soap") soapWeight += r.weight;
+  }
+  const grandTotalTon = totalWeight / 1000;
+
+  return (
+    <div className={styles.tableOuter} style={{ position: "relative", zIndex: 1, width: "100%", maxWidth: 480, margin: "0 auto" }}>
+      <div className={styles.tableWrap} style={{ overflowX: "hidden", width: "100%" }}>
+        <table className={styles.table} style={{ tableLayout: "fixed", width: "100%", maxWidth: "100%", minWidth: 0, borderCollapse: "collapse" }}>
+          <colgroup>
+            <col style={{ width: "54%" }} />
+            <col style={{ width: "20%" }} />
+            <col style={{ width: "26%" }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th style={{ textAlign: "left", padding: "6px 8px" }}>Item</th>
+              <th className={styles.center} style={{ textAlign: "center", padding: "6px 8px" }}>Qty</th>
+              <th className={styles.right} style={{ textAlign: "right", padding: "6px 8px" }}>Weight</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ item, weight, kind }, i) => {
+              const isGroupEnd = i === rows.length - 1 || rows[i + 1].kind !== kind;
+              return (
+                <tr
+                  key={item.id}
+                  className={isGroupEnd ? styles.groupEnd : undefined}
+                  style={{
+                    animation: "fadeUp 0.35s ease both",
+                    animationDelay: `${Math.min(i * 0.02, 0.4)}s`,
+                    borderBottom: isGroupEnd ? "3px solid #FFD400" : undefined,
+                  }}
+                >
+                  <td style={{ textAlign: "left", verticalAlign: "middle", padding: "6px 8px", whiteSpace: "normal", wordBreak: "break-word" }}>
+                    <div className={styles.itemCell} style={{ whiteSpace: "normal", wordBreak: "break-word" }}>
+                      <span className={styles.itemIcon}>
+                        <ProductIcon kind={kind} />
+                      </span>
+                      {item.name}
+                    </div>
+                  </td>
+                  <td className={styles.center} style={{ textAlign: "center", verticalAlign: "middle", padding: "6px 8px" }}>
+                    <input
+                      type="number"
+                      min={0}
+                      step="1"
+                      value={qtys[item.id] ?? ""}
+                      onChange={(e) => onChange(item.id, e.target.value)}
+                      disabled={disabled}
+                      className={styles.qtyInput}
+                      style={{
+                        boxSizing: "border-box",
+                        width: "100%",
+                        maxWidth: 60,
+                        minWidth: 0,
+                        display: "block",
+                        margin: "0 auto",
+                        textAlign: "center",
+                        ...(disabled ? { background: "#f1f3f7", cursor: "not-allowed" } : null),
+                      }}
+                    />
+                  </td>
+                  <td className={styles.right} style={{ textAlign: "right", verticalAlign: "middle", padding: "6px 8px" }}>
+                    {weight ? weight.toFixed(2) : 0}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={summaryCardStyle}>
+        <div style={statsRowStyle}>
+          {[
+            { label: "Weight (Ghee)", value: `${gheeWeight.toFixed(2)} kg` },
+            { label: "Weight (Oil)", value: `${oilWeight.toFixed(2)} kg` },
+            { label: "Weight (RSO)", value: `${rsoWeight.toFixed(2)} kg` },
+            { label: "Weight (SOAP)", value: `${soapWeight.toFixed(2)} kg` },
+          ].map((stat, idx) => (
+            <div key={stat.label} style={{ ...statCellStyle, borderLeft: idx === 0 ? "none" : "1px solid #d8dde6" }}>
+              <div style={statLabelStyle}>{stat.label}</div>
+              <div style={statDividerStyle} />
+              <div style={statValueStyle}>{stat.value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={summaryGrandTotalBarStyle}>
+          <span>G.Total Weight (Ton)</span>
+          <strong>{grandTotalTon.toFixed(3)}</strong>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Branding footer (logo + contact), shared by the booking form and the
+// TO's Secondary Ach. Report screens.
+function BrandFooter() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 20, padding: "14px 0", fontSize: 12, color: "#888", lineHeight: 1.7 }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/sh-automate-logo.png"
+        alt="SH Automate"
+        style={{ width: 70, height: "auto", flexShrink: 0, opacity: 0.85 }}
+      />
+      <div style={{ textAlign: "left" }}>
+        <div>All Rights Reserved</div>
+        <div style={{ fontWeight: 600, color: "#555" }}>SH Automation</div>
+        <div>
+          Mail:{" "}
+          <a href="mailto:Haseebchaudhary8558@gmail.com" style={{ color: "#888" }}>
+            Haseebchaudhary8558@gmail.com
+          </a>
+        </div>
+        <div>
+          Contact:{" "}
+          <a href="tel:+923049657700" style={{ color: "#888" }}>
+            +92 304 9657700
+          </a>
+        </div>
+      </div>
     </div>
   );
 }
