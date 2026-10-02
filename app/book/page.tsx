@@ -287,6 +287,10 @@ export default function BookPage() {
   const [reportTownFiled, setReportTownFiled] = useState(false);
   const [reportReview, setReportReview] = useState(false);
   const [showReportClosedModal, setShowReportClosedModal] = useState(false);
+  // The click on "TO,s Secondary Ach. Report" first loads the admin's settings;
+  // if that fails the reason is shown in a popup (never a silent no-op).
+  const [reportOpening, setReportOpening] = useState(false);
+  const [reportLoadError, setReportLoadError] = useState<string | null>(null);
   // Latest town id whose "already filed?" check was started — lets a slow
   // response for a previously picked town be ignored.
   const reportCheckRef = useRef("");
@@ -630,36 +634,42 @@ export default function BookPage() {
   // The TO of the selected town (empty until a town is picked).
   const reportCandidates = reportTownId ? tosForTown(toList, reportTownId) : [];
 
-  async function fetchReportConfig(): Promise<SecondaryReportConfig | null> {
+  async function fetchReportConfig(): Promise<{ config: SecondaryReportConfig | null; error: string | null }> {
     try {
-      const res = await fetch("/api/secondary-report/config", { cache: "no-store" });
-      if (!res.ok) return null;
-      const json = (await res.json()) as SecondaryReportConfig;
-      setReportConfig(json);
-      return json;
-    } catch {
-      return null;
+      const res = await fetch(`/api/secondary-report/config?t=${Date.now()}`, { cache: "no-store" });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json) {
+        return { config: null, error: (json && json.error) || `Server error (${res.status})` };
+      }
+      setReportConfig(json as SecondaryReportConfig);
+      return { config: json as SecondaryReportConfig, error: null };
+    } catch (err: any) {
+      return { config: null, error: `Network error: ${err?.message || "request failed"}` };
     }
   }
 
   async function openReport() {
-    if (deviceTimeTampered) return;
+    if (deviceTimeTampered || reportOpening) return;
+    setReportOpening(true);
+    try {
+      // Always re-read the admin's ON/OFF switch + month at the moment of opening.
+      const { config: cfg, error: loadErr } = await fetchReportConfig();
+      if (!cfg) {
+        setReportLoadError(loadErr ?? "Unknown error");
+        return;
+      }
+      if (!cfg.enabled) {
+        setShowReportClosedModal(true);
+        return;
+      }
 
-    // Always re-read the admin's ON/OFF switch + month at the moment of opening.
-    const cfg = await fetchReportConfig();
-    if (!cfg) {
-      setError("Couldn't load the report right now. Please check your connection and try again.");
-      return;
+      resetReport();
+      setError(null);
+      setReportMode(true);
+      if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+    } finally {
+      setReportOpening(false);
     }
-    if (!cfg.enabled) {
-      setShowReportClosedModal(true);
-      return;
-    }
-
-    resetReport();
-    setError(null);
-    setReportMode(true);
-    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
   }
 
   function resetReport() {
@@ -1630,8 +1640,12 @@ export default function BookPage() {
         <button
           type="button"
           onClick={openReport}
-          disabled={deviceTimeTampered}
-          style={{ ...editOrderButtonStyle, ...(deviceTimeTampered ? { opacity: 0.5, cursor: "not-allowed" } : null) }}
+          disabled={deviceTimeTampered || reportOpening}
+          style={{
+            ...editOrderButtonStyle,
+            ...(deviceTimeTampered ? { opacity: 0.5, cursor: "not-allowed" } : null),
+            ...(reportOpening ? { opacity: 0.6, cursor: "wait" } : null),
+          }}
         >
           TO,s Secondary Ach. Report
         </button>
@@ -2002,6 +2016,21 @@ export default function BookPage() {
               onClick={() => setConflictModalNames(null)}
               style={qtyOptionButtonStyle}
             >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+      {reportLoadError && (
+        <div style={modalOverlayStyle} onClick={() => setReportLoadError(null)}>
+          <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
+            <p style={{ ...urduFont, fontSize: 15, color: "#d62828", margin: "0 0 10px", textAlign: "right", lineHeight: 1.7 }}>
+              رپورٹ اس وقت نہیں کھل سکی۔ براہ کرم کچھ دیر بعد دوبارہ کوشش کریں یا سیلز ٹیم سے رابطہ کریں۔
+            </p>
+            <p style={{ fontSize: 11, color: "#888", margin: "0 0 16px", wordBreak: "break-word", direction: "ltr", textAlign: "left" }}>
+              {reportLoadError}
+            </p>
+            <button type="button" onClick={() => setReportLoadError(null)} style={qtyOptionButtonStyle}>
               OK
             </button>
           </div>

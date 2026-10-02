@@ -23,7 +23,10 @@ export async function GET() {
     .eq("tos.is_active", true);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500, headers: NO_STORE });
+    return NextResponse.json(
+      { error: `${error.message} — did you run migration_v9_to_towns.sql in Supabase?` },
+      { status: 500, headers: NO_STORE }
+    );
   }
 
   const tos = (data ?? [])
