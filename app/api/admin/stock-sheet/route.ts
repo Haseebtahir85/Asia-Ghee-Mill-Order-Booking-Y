@@ -7,12 +7,10 @@ export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function period(req: NextRequest) {
-  const m = parseInt(req.nextUrl.searchParams.get("month") ?? "", 10);
-  const y = parseInt(req.nextUrl.searchParams.get("year") ?? "", 10);
-  return { month: m, year: y, ok: m >= 1 && m <= 12 && y >= 2000 && y <= 2100 };
-}
+// never read the (large) file copy when listing — only whether one exists (file_mime)
+const SHEET_COLS = "id, report_month, report_year, file_name, uploaded_at, file_mime";
+const SHEET_COLS_OLD = "id, report_month, report_year, file_name, uploaded_at"; // before migration_v11
+const MAX_FILE_BASE64 = 6_000_000; // ~4.5 MB of Excel
 
 const n = (v: unknown): number | null => {
   if (v === null || v === undefined || v === "") return null;
@@ -20,38 +18,81 @@ const n = (v: unknown): number | null => {
   return Number.isFinite(x) ? x : null;
 };
 
-// GET /api/admin/stock-sheet?month=8&year=2026 — the uploaded sheet for a month (or null)
-export async function GET(req: NextRequest) {
-  const p = period(req);
-  if (!p.ok) return NextResponse.json({ error: "month and year are required" }, { status: 400 });
+function mimeOf(fileName: string): string {
+  return /\.xls$/i.test(fileName)
+    ? "application/vnd.ms-excel"
+    : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+}
 
-  const { data: sheet, error } = await supabaseServer
-    .from("stock_sheets")
-    .select("*")
-    .eq("report_month", p.month)
-    .eq("report_year", p.year)
-    .maybeSingle();
+// select sheets (without the file copy); works before and after migration_v11
+async function selectSheets(apply: (q: any) => any) {
+  let r = await apply(supabaseServer.from("stock_sheets").select(SHEET_COLS));
+  if (r.error) r = await apply(supabaseServer.from("stock_sheets").select(SHEET_COLS_OLD));
+  return r;
+}
+
+const withFlag = (s: any) => {
+  const { file_mime, ...rest } = s;
+  return { ...rest, has_file: !!file_mime };
+};
+
+// GET /api/admin/stock-sheet
+//   (no params)          -> { sheets: [...] }  every uploaded file, newest month first
+//   ?id=<uuid>           -> { sheet, rows }     one file with its rows
+//   ?month=8&year=2026   -> { sheet, rows }     the file for a month (or sheet: null)
+export async function GET(req: NextRequest) {
+  const id = req.nextUrl.searchParams.get("id") ?? "";
+  const m = parseInt(req.nextUrl.searchParams.get("month") ?? "", 10);
+  const y = parseInt(req.nextUrl.searchParams.get("year") ?? "", 10);
+
+  // ---- one file ----
+  if (id || (m >= 1 && m <= 12 && y >= 2000)) {
+    if (id && !UUID.test(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+    const { data: sheet, error } = await selectSheets((q) =>
+      (id ? q.eq("id", id) : q.eq("report_month", m).eq("report_year", y)).maybeSingle()
+    );
+    if (error) {
+      return NextResponse.json(
+        { error: `${error.message} — did you run migration_v10_stock_check.sql in Supabase?` },
+        { status: 500 }
+      );
+    }
+    if (!sheet) return NextResponse.json({ sheet: null, rows: [] });
+    const { data: rows, error: rowsErr } = await supabaseServer
+      .from("stock_sheet_rows")
+      .select("*")
+      .eq("sheet_id", sheet.id)
+      .order("row_no", { ascending: true });
+    if (rowsErr) return NextResponse.json({ error: rowsErr.message }, { status: 500 });
+    return NextResponse.json({ sheet: withFlag(sheet), rows: rows ?? [] });
+  }
+
+  // ---- the list of all uploaded files ----
+  const { data: sheets, error } = await selectSheets((q) =>
+    q.order("report_year", { ascending: false }).order("report_month", { ascending: false })
+  );
   if (error) {
     return NextResponse.json(
       { error: `${error.message} — did you run migration_v10_stock_check.sql in Supabase?` },
       { status: 500 }
     );
   }
-  if (!sheet) return NextResponse.json({ sheet: null, rows: [] });
-
-  const { data: rows, error: rowsErr } = await supabaseServer
-    .from("stock_sheet_rows")
-    .select("*")
-    .eq("sheet_id", sheet.id)
-    .order("row_no", { ascending: true });
-  if (rowsErr) return NextResponse.json({ error: rowsErr.message }, { status: 500 });
-
-  return NextResponse.json({ sheet, rows: rows ?? [] });
+  const { data: rowRefs } = await supabaseServer.from("stock_sheet_rows").select("sheet_id, to_id");
+  const counts = new Map<string, { rows: number; matched: number }>();
+  for (const r of rowRefs ?? []) {
+    const c = counts.get(r.sheet_id) ?? { rows: 0, matched: 0 };
+    c.rows++;
+    if (r.to_id) c.matched++;
+    counts.set(r.sheet_id, c);
+  }
+  return NextResponse.json({
+    sheets: (sheets ?? []).map((s: any) => ({ ...withFlag(s), ...(counts.get(s.id) ?? { rows: 0, matched: 0 }) })),
+  });
 }
 
-// POST /api/admin/stock-sheet — save (replace) the sheet for a month.
-// Body: { report_month, report_year, file_name, rows: [{ row_no, to_name, towns, to_id,
-//         opening|primary|secondary|closing: {ghee,oil,rso}, remarks }] }
+// POST /api/admin/stock-sheet — save (replace) the file for a month.
+// Body: { report_month, report_year, file_name, file_data?: base64 of the Excel file,
+//         rows: [{ row_no, to_name, towns, to_id, opening|primary|secondary|closing: {ghee,oil,rso}, remarks }] }
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const month = parseInt(String(body.report_month ?? ""), 10);
@@ -63,6 +104,14 @@ export async function POST(req: NextRequest) {
   if (rowsIn.length === 0) {
     return NextResponse.json({ error: "The sheet has no rows" }, { status: 400 });
   }
+  const fileName = String(body.file_name ?? "").slice(0, 200) || null;
+
+  // optional copy of the uploaded file, so it can be downloaded again exactly as uploaded
+  let fileData: string | null = null;
+  if (typeof body.file_data === "string" && body.file_data) {
+    const b64 = body.file_data.replace(/^data:[^;]*;base64,/, "").replace(/\s/g, "");
+    if (b64.length > 0 && b64.length <= MAX_FILE_BASE64 && /^[A-Za-z0-9+/]+={0,2}$/.test(b64)) fileData = b64;
+  }
 
   // only keep TO links that really exist
   const wantedToIds = Array.from(new Set(rowsIn.map((r) => String(r.to_id ?? "")).filter((id) => UUID.test(id))));
@@ -72,7 +121,7 @@ export async function POST(req: NextRequest) {
     for (const t of tos ?? []) validToIds.add(t.id);
   }
 
-  // replace any sheet already saved for this month
+  // replace any file already saved for this month
   const { error: delErr } = await supabaseServer
     .from("stock_sheets")
     .delete()
@@ -85,13 +134,28 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { data: sheet, error: sheetErr } = await supabaseServer
-    .from("stock_sheets")
-    .insert({ report_month: month, report_year: year, file_name: String(body.file_name ?? "").slice(0, 200) || null })
-    .select()
-    .single();
+  const base = { report_month: month, report_year: year, file_name: fileName };
+  let fileStored = false;
+  let sheet: any = null;
+  let sheetErr: any = null;
+  if (fileData) {
+    const r = await supabaseServer
+      .from("stock_sheets")
+      .insert({ ...base, file_data: fileData, file_mime: mimeOf(fileName ?? "") })
+      .select(SHEET_COLS_OLD)
+      .single();
+    sheet = r.data;
+    sheetErr = r.error;
+    fileStored = !!sheet;
+  }
+  if (!sheet) {
+    // no copy kept (none sent, too large, or migration_v11 not run yet) — the data is still saved
+    const r = await supabaseServer.from("stock_sheets").insert(base).select(SHEET_COLS_OLD).single();
+    sheet = r.data;
+    sheetErr = r.error;
+  }
   if (sheetErr || !sheet) {
-    return NextResponse.json({ error: sheetErr?.message ?? "Failed to save the sheet" }, { status: 500 });
+    return NextResponse.json({ error: sheetErr?.message ?? "Failed to save the stock sheet" }, { status: 500 });
   }
 
   const rows = rowsIn
@@ -123,14 +187,64 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: rowsErr.message }, { status: 500 });
   }
 
-  return NextResponse.json({ sheet, saved: rows.length, matched: rows.filter((r) => r.to_id).length }, { status: 201 });
+  return NextResponse.json(
+    { sheet, saved: rows.length, matched: rows.filter((r) => r.to_id).length, file_stored: fileStored },
+    { status: 201 }
+  );
 }
 
-// DELETE /api/admin/stock-sheet?month=8&year=2026 — remove the sheet for a month
+// DELETE /api/admin/stock-sheet?id=<uuid>  (or ?month=8&year=2026) — remove one uploaded file
 export async function DELETE(req: NextRequest) {
-  const p = period(req);
-  if (!p.ok) return NextResponse.json({ error: "month and year are required" }, { status: 400 });
-  const { error } = await supabaseServer.from("stock_sheets").delete().eq("report_month", p.month).eq("report_year", p.year);
+  const id = req.nextUrl.searchParams.get("id") ?? "";
+  const m = parseInt(req.nextUrl.searchParams.get("month") ?? "", 10);
+  const y = parseInt(req.nextUrl.searchParams.get("year") ?? "", 10);
+
+  let q = supabaseServer.from("stock_sheets").delete();
+  if (id) {
+    if (!UUID.test(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+    q = q.eq("id", id);
+  } else if (m >= 1 && m <= 12 && y >= 2000) {
+    q = q.eq("report_month", m).eq("report_year", y);
+  } else {
+    return NextResponse.json({ error: "id (or month and year) is required" }, { status: 400 });
+  }
+  const { error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
+}
+
+// PATCH /api/admin/stock-sheet?id=<uuid> — change which TO each row is matched to.
+// Body: { links: [{ id: <row id>, to_id: <TO id or null> }] }
+// Only the matching changes: the saved file copy and all numbers stay exactly as uploaded.
+export async function PATCH(req: NextRequest) {
+  const id = req.nextUrl.searchParams.get("id") ?? "";
+  if (!UUID.test(id)) return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+
+  const body = await req.json().catch(() => ({}));
+  const links: { id: string; to_id: string | null }[] = (Array.isArray(body.links) ? body.links : [])
+    .map((l: any) => ({ id: String(l?.id ?? ""), to_id: UUID.test(String(l?.to_id ?? "")) ? String(l.to_id) : null }))
+    .filter((l: { id: string }) => UUID.test(l.id));
+  if (links.length === 0) return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
+
+  const wanted = Array.from(new Set(links.map((l) => l.to_id).filter(Boolean))) as string[];
+  const valid = new Set<string>();
+  if (wanted.length > 0) {
+    const { data: tos } = await supabaseServer.from("tos").select("id").in("id", wanted);
+    for (const t of tos ?? []) valid.add(t.id);
+  }
+
+  const results = await Promise.all(
+    links.map((l) =>
+      supabaseServer
+        .from("stock_sheet_rows")
+        .update({ to_id: l.to_id && valid.has(l.to_id) ? l.to_id : null })
+        .eq("id", l.id)
+        .eq("sheet_id", id)
+    )
+  );
+  const failed = results.find((r) => r.error);
+  if (failed?.error) return NextResponse.json({ error: failed.error.message }, { status: 500 });
+
+  const { data: rows } = await supabaseServer.from("stock_sheet_rows").select("to_id").eq("sheet_id", id);
+  return NextResponse.json({ ok: true, rows: (rows ?? []).length, matched: (rows ?? []).filter((r: any) => r.to_id).length });
 }

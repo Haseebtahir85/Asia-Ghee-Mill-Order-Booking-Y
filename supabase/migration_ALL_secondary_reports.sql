@@ -179,6 +179,9 @@ create table if not exists stock_sheet_rows (
 create index if not exists stock_sheet_rows_sheet_idx on stock_sheet_rows (sheet_id);
 create index if not exists stock_sheet_rows_to_idx on stock_sheet_rows (to_id);
 
+alter table stock_sheets add column if not exists file_data text;
+alter table stock_sheets add column if not exists file_mime text;
+
 alter table secondary_reports add column if not exists check_status text;
 alter table secondary_reports add column if not exists check_data jsonb;
 

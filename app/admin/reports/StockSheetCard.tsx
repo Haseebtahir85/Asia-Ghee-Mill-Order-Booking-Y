@@ -11,22 +11,36 @@ const NAVY = "#0b2b5b";
 const YELLOW = "#F6C90E";
 const RED = "#D62828";
 
-interface SavedSheet {
+interface SheetSummary {
   id: string;
   report_month: number;
   report_year: number;
   file_name: string | null;
   uploaded_at: string;
+  has_file: boolean; // a copy of the original Excel file was kept
+  rows: number;
+  matched: number;
 }
 
 interface Preview {
   fileName: string;
+  fileData: string | null; // base64 of the uploaded file (new uploads only)
   parsed: ParsedSheet;
   rows: ParsedSheetRow[];
+  rowIds: string[]; // saved row ids (when reviewing a saved file)
   toIds: string[]; // chosen TO for each row ("" = not matched)
   month: number;
   year: number;
-  existing: boolean; // opened from the saved sheet (Review matching) rather than a new upload
+  sheetId: string | null; // set when reviewing a saved file
+}
+
+// base64 of the file, so the original can be downloaded again exactly as uploaded
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let bin = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode(...Array.from(bytes.subarray(i, i + CHUNK)));
+  return btoa(bin);
 }
 
 // Reads the first sheet in the workbook that looks like the "Town wise Closing
@@ -73,11 +87,10 @@ function formatWhen(iso: string): string {
 const f3 = (n: number | null | undefined) => (n === null || n === undefined ? "—" : n.toFixed(3));
 
 export default function StockSheetCard({ month, year }: { month: number; year: number }) {
-  const [sheet, setSheet] = useState<SavedSheet | null>(null);
-  const [savedRows, setSavedRows] = useState<any[]>([]);
+  const [sheets, setSheets] = useState<SheetSummary[]>([]);
   const [tos, setTos] = useState<TOWithTowns[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null); // "upload" | "save" | a file id
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -87,22 +100,21 @@ export default function StockSheetCard({ month, year }: { month: number; year: n
     setLoading(true);
     try {
       const [sRes, tRes] = await Promise.all([
-        fetch(`/api/admin/stock-sheet?month=${month}&year=${year}`, { cache: "no-store" }),
+        fetch("/api/admin/stock-sheet", { cache: "no-store" }),
         fetch("/api/admin/tos", { cache: "no-store" }),
       ]);
       const sJson = await sRes.json();
       const tJson = await tRes.json();
-      if (!sRes.ok) throw new Error(sJson.error || "Failed to load the stock sheet");
-      setSheet(sJson.sheet ?? null);
-      setSavedRows(sJson.rows ?? []);
+      if (!sRes.ok) throw new Error(sJson.error || "Failed to load the stock sheets");
+      setSheets(sJson.sheets ?? []);
       setTos(tRes.ok ? tJson.tos ?? [] : []);
       setError(null);
     } catch (err: any) {
-      setError(err.message || "Failed to load the stock sheet");
+      setError(err.message || "Failed to load the stock sheets");
     } finally {
       setLoading(false);
     }
-  }, [month, year]);
+  }, []);
 
   useEffect(() => {
     load();
@@ -117,7 +129,6 @@ export default function StockSheetCard({ month, year }: { month: number; year: n
       const result: string[] = names.map(() => "");
       const taken = new Set<string>();
       const lowerTrim = (v: string) => v.trim().toLowerCase().replace(/\s+/g, " ");
-      // pass 1: exact
       names.forEach((n, i) => {
         const t = tos.find((x) => !taken.has(x.id) && lowerTrim(x.name) === lowerTrim(n));
         if (t) {
@@ -125,7 +136,6 @@ export default function StockSheetCard({ month, year }: { month: number; year: n
           taken.add(t.id);
         }
       });
-      // pass 2: ignoring dots / punctuation / word order
       names.forEach((n, i) => {
         if (result[i]) return;
         const t = tos.find((x) => !taken.has(x.id) && nameKey(x.name) === nameKey(n));
@@ -143,146 +153,210 @@ export default function StockSheetCard({ month, year }: { month: number; year: n
     const file = e.target.files?.[0];
     e.target.value = ""; // allow picking the same file again
     if (!file) return;
-    setBusy(true);
+    setBusyId("upload");
     setError(null);
     setStatus(null);
     try {
       const parsed = await readWorkbook(file);
+      const fileData = await fileToBase64(file);
       setPreview({
         fileName: file.name,
+        fileData: fileData.length <= 5_500_000 ? fileData : null,
         parsed,
         rows: parsed.rows,
+        rowIds: [],
         toIds: autoMatchAll(parsed.rows.map((r) => r.to_name)),
         month: parsed.period?.month ?? month,
         year: parsed.period?.year ?? year,
-        existing: false,
+        sheetId: null,
       });
     } catch (err: any) {
       setError(err.message || "Could not read this file.");
     } finally {
-      setBusy(false);
+      setBusyId(null);
     }
   }
 
-  // Re-open the saved sheet to fix the TO matching (e.g. after adding a TO).
-  function reviewSaved() {
-    if (!sheet) return;
-    const rows: ParsedSheetRow[] = savedRows.map((r) => ({
-      row_no: r.row_no,
-      to_name: r.sheet_to_name,
-      towns: r.sheet_towns ?? "",
-      opening: { ghee: r.opening_ghee, oil: r.opening_oil, rso: r.opening_rso },
-      primary: { ghee: Number(r.primary_ghee), oil: Number(r.primary_oil), rso: Number(r.primary_rso) },
-      secondary: { ghee: r.secondary_ghee, oil: r.secondary_oil, rso: r.secondary_rso },
-      closing: { ghee: r.closing_ghee, oil: r.closing_oil, rso: r.closing_rso },
-      remarks: r.remarks ?? "",
-    }));
-    setPreview({
-      fileName: sheet.file_name ?? "",
-      parsed: { rows, period: { month: sheet.report_month, year: sheet.report_year }, warnings: [], formulaChecked: false, formulaOk: false },
-      rows,
-      toIds: (() => {
-        // keep links already saved; try to match the rest by name
-        const auto = autoMatchAll(savedRows.map((r) => r.sheet_to_name));
-        const used = new Set(savedRows.map((r) => r.to_id).filter(Boolean));
-        return savedRows.map((r, i) => r.to_id || (auto[i] && !used.has(auto[i]) ? auto[i] : ""));
-      })(),
-      month: sheet.report_month,
-      year: sheet.report_year,
-      existing: true,
-    });
+  // Re-open a saved file to fix which TO each row is matched to (e.g. after adding a TO).
+  async function reviewSaved(sheet: SheetSummary) {
+    setBusyId(sheet.id);
+    setError(null);
+    setStatus(null);
+    try {
+      const res = await fetch(`/api/admin/stock-sheet?id=${sheet.id}`, { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok || !json.sheet) throw new Error(json.error || "Failed to open the file");
+      const saved: any[] = json.rows ?? [];
+      const rows: ParsedSheetRow[] = saved.map((r) => ({
+        row_no: r.row_no,
+        to_name: r.sheet_to_name,
+        towns: r.sheet_towns ?? "",
+        opening: { ghee: r.opening_ghee, oil: r.opening_oil, rso: r.opening_rso },
+        primary: { ghee: Number(r.primary_ghee), oil: Number(r.primary_oil), rso: Number(r.primary_rso) },
+        secondary: { ghee: r.secondary_ghee, oil: r.secondary_oil, rso: r.secondary_rso },
+        closing: { ghee: r.closing_ghee, oil: r.closing_oil, rso: r.closing_rso },
+        remarks: r.remarks ?? "",
+      }));
+      // keep links already saved; try to match the rest by name
+      const auto = autoMatchAll(saved.map((r) => r.sheet_to_name));
+      const used = new Set(saved.map((r) => r.to_id).filter(Boolean));
+      setPreview({
+        fileName: sheet.file_name ?? "",
+        fileData: null,
+        parsed: { rows, period: { month: sheet.report_month, year: sheet.report_year }, warnings: [], formulaChecked: false, formulaOk: false },
+        rows,
+        rowIds: saved.map((r) => r.id),
+        toIds: saved.map((r, i) => r.to_id || (auto[i] && !used.has(auto[i]) ? auto[i] : "")),
+        month: sheet.report_month,
+        year: sheet.report_year,
+        sheetId: sheet.id,
+      });
+    } catch (err: any) {
+      setError(err.message || "Failed to open the file");
+    } finally {
+      setBusyId(null);
+    }
   }
 
   async function save() {
     if (!preview) return;
-    setBusy(true);
+    setBusyId("save");
     setError(null);
     try {
-      const res = await fetch("/api/admin/stock-sheet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          report_month: preview.month,
-          report_year: preview.year,
-          file_name: preview.fileName,
-          rows: preview.rows.map((r, i) => ({ ...r, to_id: preview.toIds[i] || null })),
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error ?? "Failed to save the stock sheet");
-      setStatus(`Saved ${json.saved} rows for ${monthLabel(preview.month, preview.year)} — ${json.matched} matched to TO's.`);
+      if (preview.sheetId) {
+        // reviewing a saved file: only the TO matching changes — the file itself is left as it is
+        const res = await fetch(`/api/admin/stock-sheet?id=${preview.sheetId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ links: preview.rowIds.map((id, i) => ({ id, to_id: preview.toIds[i] || null })) }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error ?? "Failed to save the matching");
+        setStatus(`Matching saved — ${json.matched} of ${json.rows} rows matched to TO's.`);
+      } else {
+        const res = await fetch("/api/admin/stock-sheet", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            report_month: preview.month,
+            report_year: preview.year,
+            file_name: preview.fileName,
+            file_data: preview.fileData,
+            rows: preview.rows.map((r, i) => ({ ...r, to_id: preview.toIds[i] || null })),
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error ?? "Failed to save the stock sheet");
+        let msg = `Saved ${json.saved} rows for ${monthLabel(preview.month, preview.year)} — ${json.matched} matched to TO's.`;
+        if (preview.fileData && json.file_stored === false) {
+          msg += " A copy of the file could not be kept (run migration_v11_stock_sheet_file.sql); its download will be rebuilt in the same layout.";
+        }
+        setStatus(msg);
+      }
       setPreview(null);
       load();
     } catch (err: any) {
-      setError(err.message || "Failed to save the stock sheet");
+      setError(err.message || "Failed to save");
     } finally {
-      setBusy(false);
+      setBusyId(null);
     }
   }
 
-  async function remove() {
-    if (!sheet) return;
-    if (!confirm(`Remove the stock sheet for ${monthLabel(sheet.report_month, sheet.report_year)}? Reports will no longer be compared with it.`)) return;
-    setBusy(true);
+  async function remove(sheet: SheetSummary) {
+    if (!confirm(`Delete the stock sheet for ${monthLabel(sheet.report_month, sheet.report_year)}${sheet.file_name ? ` (${sheet.file_name})` : ""}? Reports will no longer be compared with it.`)) return;
+    setBusyId(sheet.id);
     setError(null);
-    const res = await fetch(`/api/admin/stock-sheet?month=${sheet.report_month}&year=${sheet.report_year}`, { method: "DELETE" });
+    const res = await fetch(`/api/admin/stock-sheet?id=${sheet.id}`, { method: "DELETE" });
     if (!res.ok) {
       const json = await res.json().catch(() => ({}));
-      setError(json.error ?? "Failed to remove the stock sheet");
+      setError(json.error ?? "Failed to delete the file");
     } else {
-      setStatus("Stock sheet removed.");
+      setStatus(`Deleted the ${monthLabel(sheet.report_month, sheet.report_year)} file.`);
     }
-    setBusy(false);
+    setBusyId(null);
     load();
   }
 
-  const matchedSaved = savedRows.filter((r) => r.to_id).length;
+  const busy = busyId !== null;
 
   return (
     <section style={cardStyle}>
-      <h2 style={cardTitleStyle}>Stock sheet — {monthLabel(month, year)}</h2>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <h2 style={{ ...cardTitleStyle, margin: 0 }}>Stock sheets</h2>
+        <button type="button" onClick={() => fileRef.current?.click()} disabled={busy || loading} style={{ ...buttonStyle, opacity: busy ? 0.7 : 1 }}>
+          {busyId === "upload" ? "Reading..." : "Upload Excel"}
+        </button>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} style={{ display: "none" }} />
+      </div>
 
       {error && <div style={errorStyle}>{error}</div>}
       {status && <div style={statusStyle}>{status}</div>}
 
       {loading ? (
-        <p style={{ fontSize: 13, color: "#666" }}>Loading...</p>
-      ) : sheet ? (
-        <div style={{ fontSize: 13, color: "#333", lineHeight: 1.8, marginBottom: 12 }}>
-          <div>
-            <strong>{sheet.file_name || "Uploaded file"}</strong>
-          </div>
-          <div style={{ color: "#666" }}>
-            {formatWhen(sheet.uploaded_at)} · {savedRows.length} rows · {matchedSaved} matched to TO&apos;s
-          </div>
-        </div>
+        <p style={{ fontSize: 13, color: "#666", margin: 0 }}>Loading...</p>
+      ) : sheets.length === 0 ? (
+        <p style={{ fontSize: 13, color: "#666", margin: 0 }}>No file uploaded yet.</p>
       ) : (
-        <p style={{ fontSize: 13, color: "#666", margin: "0 0 12px" }}>No file uploaded for this month.</p>
-      )}
+        <div style={{ display: "grid", gap: 8 }}>
+          {sheets.map((sh) => {
+            const current = sh.report_month === month && sh.report_year === year;
+            return (
+              <div
+                key={sh.id}
+                style={{
+                  border: `1px solid ${current ? YELLOW : "#e6e9ef"}`,
+                  background: current ? "#fffbea" : "#fafbfd",
+                  borderRadius: 8,
+                  padding: "10px 12px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ minWidth: 0, fontSize: 13, lineHeight: 1.7 }}>
+                  <div style={{ fontWeight: 700, color: NAVY }}>
+                    {monthLabel(sh.report_month, sh.report_year)}
+                    {current && (
+                      <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: "#8a4b00", background: "#fff4e0", borderRadius: 10, padding: "1px 8px" }}>
+                        Report month
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ color: "#333", wordBreak: "break-word" }}>{sh.file_name || "Uploaded file"}</div>
+                  <div style={{ color: "#666", fontSize: 12 }}>
+                    {formatWhen(sh.uploaded_at)} · {sh.rows} rows · {sh.matched} matched to TO&apos;s
+                  </div>
+                </div>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button type="button" onClick={() => fileRef.current?.click()} disabled={busy || loading} style={{ ...buttonStyle, opacity: busy ? 0.7 : 1 }}>
-          {busy && !preview ? "Reading..." : sheet ? "Upload new file" : "Upload Excel"}
-        </button>
-        {sheet && (
-          <>
-            <button type="button" onClick={reviewSaved} disabled={busy} style={secondaryButtonStyle}>
-              Review matching
-            </button>
-            <button type="button" onClick={remove} disabled={busy} style={{ ...secondaryButtonStyle, color: RED, borderColor: "#f0b8b8" }}>
-              Remove
-            </button>
-          </>
-        )}
-        <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} style={{ display: "none" }} />
-      </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <a
+                    href={`/api/admin/stock-sheet/download?id=${sh.id}`}
+                    title={sh.has_file ? "The file exactly as uploaded" : "Rebuilt in the same layout"}
+                    style={{ ...secondaryButtonStyle, textDecoration: "none", display: "inline-block", padding: "6px 12px" }}
+                  >
+                    Download
+                  </a>
+                  <button type="button" onClick={() => reviewSaved(sh)} disabled={busy} style={{ ...secondaryButtonStyle, padding: "6px 12px" }}>
+                    {busyId === sh.id ? "Opening..." : "Review matching"}
+                  </button>
+                  <button type="button" onClick={() => remove(sh)} disabled={busy} style={{ ...secondaryButtonStyle, padding: "6px 12px", color: RED, borderColor: "#f0b8b8" }}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {preview && (
         <PreviewModal
           preview={preview}
           tos={tos}
-          saving={busy}
-          replacing={!!sheet && sheet.report_month === preview.month && sheet.report_year === preview.year && !preview.existing}
+          saving={busyId === "save"}
+          replacing={!preview.sheetId && sheets.some((x) => x.report_month === preview.month && x.report_year === preview.year)}
           onChange={setPreview}
           onCancel={() => setPreview(null)}
           onSave={save}
@@ -338,7 +412,7 @@ function PreviewModal({
             value={preview.month}
             onChange={(e) => onChange({ ...preview, month: parseInt(e.target.value, 10) })}
             style={{ ...inputStyle, width: 140 }}
-            disabled={preview.existing}
+            disabled={!!preview.sheetId}
           >
             {MONTH_NAMES.map((n, i) => (
               <option key={n} value={i + 1}>
@@ -350,7 +424,7 @@ function PreviewModal({
             value={preview.year}
             onChange={(e) => onChange({ ...preview, year: parseInt(e.target.value, 10) })}
             style={{ ...inputStyle, width: 90 }}
-            disabled={preview.existing}
+            disabled={!!preview.sheetId}
           >
             {years.map((y) => (
               <option key={y} value={y}>
@@ -442,7 +516,7 @@ function PreviewModal({
             Cancel
           </button>
           <button type="button" onClick={onSave} disabled={saving} style={buttonStyle}>
-            {saving ? "Saving..." : "Save"}
+            {saving ? "Saving..." : preview.sheetId ? "Save matching" : "Save"}
           </button>
         </div>
       </div>
