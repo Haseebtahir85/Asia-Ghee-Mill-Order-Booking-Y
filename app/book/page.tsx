@@ -609,18 +609,23 @@ export default function BookPage() {
 
   // Active TO's, one entry per (TO, town). A TO can have many towns; a town
   // has exactly one TO.
-  const toList = reportConfig?.tos ?? [];
+  // (entries without a town are ignored — the type guard also keeps this
+  // compiling if lib/types.ts still has the older "town_id may be null" type)
+  const toList = useMemo(
+    () => (reportConfig?.tos ?? []).filter((r): r is { id: string; name: string; town_id: string } => !!r.town_id),
+    [reportConfig]
+  );
 
   // Each TO once, with all of its town ids (what the TO's Name search lists).
   const uniqueTos = useMemo(() => {
     const map = new Map<string, { id: string; name: string; townIds: string[] }>();
-    for (const r of reportConfig?.tos ?? []) {
+    for (const r of toList) {
       const e = map.get(r.id);
       if (e) e.townIds.push(r.town_id);
       else map.set(r.id, { id: r.id, name: r.name, townIds: [r.town_id] });
     }
     return Array.from(map.values());
-  }, [reportConfig]);
+  }, [toList]);
 
   // The TO of the selected town (empty until a town is picked).
   const reportCandidates = reportTownId ? tosForTown(toList, reportTownId) : [];
