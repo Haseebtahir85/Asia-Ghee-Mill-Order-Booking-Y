@@ -212,37 +212,30 @@ function getIconKind(item: Item): IconKind {
   return "bucket";
 }
 
-// "10 Pack" and "12 Pack" are two rival packaging lines that scale together
-// across weights — "1 Kg 10 Pack", "1/2 Kg 20 Pack", "1/4 Kg 40 Pack" and
-// "1 Ltr. 10 Pack" are all the "10" family (pack count × weight ≈ 10);
-// "1 Kg 12 Pack", "1/2 Kg 24 Pack", "1/4 Kg 48 Pack" are the "12" family
-// (pack count × weight ≈ 12). The two families can never be ordered
-// together anywhere in the same bill. "5 Pack" items (pack count × weight
-// ≈ 5) fall outside both families and are never restricted.
-function parseWeightValue(numStr: string): number {
-  if (numStr.includes("/")) {
-    const [a, b] = numStr.split("/").map(Number);
-    return b ? a / b : NaN;
-  }
-  return Number(numStr);
+// Two rival packaging lines. Items of the SAME batch can be ordered together,
+// but as soon as one item of a batch is in the bill, no item of the other
+// batch can be.
+//
+//   Batch 1: 1 Kg 10 Pack, 1/2 Kg 20 Pack, 1/4 Kg 40 Pack, 1 Ltr. 10 Pack
+//   Batch 2: 1 Kg 12 Pack, 1/2 Kg 24 Pack, 1/4 Kg 48 Pack, 1 Ltr. 12 Pack
+//
+// Items are matched by name (capital letters, dots and extra spaces don't
+// matter, so "1 Ltr. 10 Pack" = "1 ltr 10 pack"). Any other item — including
+// other pack sizes — is never restricted.
+const PACK_BATCH_1 = ["1 Kg 10 Pack", "1/2 Kg 20 Pack", "1/4 Kg 40 Pack", "1 Ltr. 10 Pack"];
+const PACK_BATCH_2 = ["1 Kg 12 Pack", "1/2 Kg 24 Pack", "1/4 Kg 48 Pack", "1 Ltr. 12 Pack"];
+
+function packNameKey(name: string): string {
+  return name.toLowerCase().replace(/\./g, " ").replace(/\s+/g, " ").trim();
 }
 
-function getPackFamily(item: Item): 10 | 12 | null {
-  const name = item.name.toLowerCase();
-  if (!name.includes("pack")) return null;
+const PACK_BATCH_BY_NAME = new Map<string, 1 | 2>([
+  ...PACK_BATCH_1.map((n): [string, 1 | 2] => [packNameKey(n), 1]),
+  ...PACK_BATCH_2.map((n): [string, 1 | 2] => [packNameKey(n), 2]),
+]);
 
-  const weightMatch = name.match(/(\d+(?:\/\d+)?)\s*(kg|ltr\.?|l\b)/i);
-  const countMatch = name.match(/(\d+)\s*pack/i);
-  if (!weightMatch || !countMatch) return null;
-
-  const weightVal = parseWeightValue(weightMatch[1]);
-  const packCount = parseInt(countMatch[1], 10);
-  if (!weightVal || !packCount) return null;
-
-  const baseCount = Math.round(packCount * weightVal * 1000) / 1000;
-  if (Math.abs(baseCount - 10) < 0.01) return 10;
-  if (Math.abs(baseCount - 12) < 0.01) return 12;
-  return null;
+function getPackBatch(item: Item): 1 | 2 | null {
+  return PACK_BATCH_BY_NAME.get(packNameKey(item.name)) ?? null;
 }
 
 const QTY_OPTIONS = [1, 2, 3, 4];
@@ -582,14 +575,13 @@ export default function BookPage() {
   // to submit, so the weight message takes priority whenever it applies.
   const displayedError = grandTotalExceedsLimit ? WEIGHT_LIMIT_MESSAGE : error;
 
-  // Global rule: the "10 Pack" family and "12 Pack" family can never both
-  // be active in the same order, regardless of weight — flag every active
-  // item from both families the moment both are present at once.
+  // Batch 1 and Batch 2 can never both be in the same order — flag every
+  // active item from both batches the moment both are present at once.
   const conflictItemIds = useMemo(() => {
-    const tenActive = rows.filter((r) => getPackFamily(r.item) === 10 && r.qty > 0);
-    const twelveActive = rows.filter((r) => getPackFamily(r.item) === 12 && r.qty > 0);
-    if (tenActive.length > 0 && twelveActive.length > 0) {
-      return new Set([...tenActive, ...twelveActive].map((r) => r.item.id));
+    const batch1Active = rows.filter((r) => getPackBatch(r.item) === 1 && r.qty > 0);
+    const batch2Active = rows.filter((r) => getPackBatch(r.item) === 2 && r.qty > 0);
+    if (batch1Active.length > 0 && batch2Active.length > 0) {
+      return new Set([...batch1Active, ...batch2Active].map((r) => r.item.id));
     }
     return new Set<string>();
   }, [rows]);
