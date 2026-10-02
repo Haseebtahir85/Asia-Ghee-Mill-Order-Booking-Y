@@ -16,23 +16,31 @@ const NO_STORE = { "Cache-Control": "no-store, max-age=0" };
 export async function GET() {
   const settings = await loadSecondaryReportSettings();
 
-  // one entry per (active TO, town) — a town has at most one TO
-  const { data, error } = await supabaseServer
-    .from("to_towns")
-    .select("to_id, town_id, tos!inner(name, is_active, sort_order)")
-    .eq("tos.is_active", true);
+  // one entry per (active TO, town) — a town has at most one TO.
+  // Plain queries joined here (no embedded relationships), so this works
+  // even before Supabase has refreshed its schema cache.
+  const [tosRes, linksRes] = await Promise.all([
+    supabaseServer.from("tos").select("id, name, sort_order").eq("is_active", true),
+    supabaseServer.from("to_towns").select("to_id, town_id"),
+  ]);
 
-  if (error) {
+  const failed = tosRes.error || linksRes.error;
+  if (failed) {
     return NextResponse.json(
-      { error: `${error.message} — did you run migration_v9_to_towns.sql in Supabase?` },
+      { error: `${failed.message} — did you run migration_v9_to_towns.sql in Supabase?` },
       { status: 500, headers: NO_STORE }
     );
   }
 
-  const tos = (data ?? [])
-    .map((r: any) => ({ id: r.to_id, name: r.tos?.name ?? "", town_id: r.town_id, sort: r.tos?.sort_order ?? 0 }))
-    .sort((a: any, b: any) => a.sort - b.sort)
-    .map(({ id, name, town_id }: any) => ({ id, name, town_id }));
+  const activeTo = new Map((tosRes.data ?? []).map((t: any) => [t.id, t]));
+  const tos = (linksRes.data ?? [])
+    .filter((l: any) => activeTo.has(l.to_id))
+    .map((l: any) => {
+      const t: any = activeTo.get(l.to_id);
+      return { id: l.to_id as string, name: t.name as string, town_id: l.town_id as string, sort: t.sort_order ?? 0 };
+    })
+    .sort((a, b) => a.sort - b.sort)
+    .map(({ id, name, town_id }) => ({ id, name, town_id }));
 
   return NextResponse.json({ ...settings, tos }, { headers: NO_STORE });
 }
