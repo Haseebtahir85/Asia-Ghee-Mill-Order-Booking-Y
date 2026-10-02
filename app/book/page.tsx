@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Item, Town } from "@/lib/types";
+import { Item, SecondaryReportConfig, Town } from "@/lib/types";
+import {
+  REPORT_ALREADY_FILED_MESSAGE,
+  REPORT_DISABLED_MESSAGE,
+  REPORT_NO_TO_MESSAGE,
+  monthLabel,
+} from "@/lib/secondaryReport";
 import styles from "./book.module.css";
 
 // Jameel Noori Nastaleeq loads via next/font/local (see lib/fonts.ts) and is
@@ -29,6 +35,8 @@ const TOWN_LOCKED_MESSAGE = "ترمیم کے دوران ٹاؤن تبدیل نہ
 
 // Shown under the Town / TO's Name fields on steps 2 and 3 of the TO's
 // Secondary Ach. Report — those two fields are carried over from step 1.
+// (The TO's Name itself is never typed: it's filled in from the admin's
+// "TO's Names" list when the town is picked.)
 const REPORT_FIELDS_LOCKED_MESSAGE = "ٹاؤن اور ٹی او کا نام پہلے مرحلے سے لیا گیا ہے۔";
 
 // Shared with every device-time-tampering guard (town search, every input
@@ -144,31 +152,6 @@ function getRemainingHoursMinutes(ms: number): { hours: number; minutes: number 
   return { hours: Math.floor(totalMinutes / 60), minutes: totalMinutes % 60 };
 }
 
-const MONTH_NAMES = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-];
-
-// Previous + current month names (Pakistan calendar) for the TO's
-// Secondary Ach. Report headings. The previous month wraps correctly
-// across a year boundary (January -> December).
-function getReportMonthNames(ms: number): { previous: string; current: string } {
-  const { month } = getPakistanParts(ms);
-  const currentIdx = month - 1;
-  const previousIdx = (currentIdx + 11) % 12;
-  return { previous: MONTH_NAMES[previousIdx], current: MONTH_NAMES[currentIdx] };
-}
-
 // Icon is the admin's explicit choice (item.icon) when one is set.
 // Otherwise it's guessed from what the item is called — a plain
 // substring check, so it doesn't matter what comes before the
@@ -273,11 +256,17 @@ export default function BookPage() {
 
   // "TO's Secondary Ach. Report" — a 3-step flow that reuses the same
   // Town search + item table as the booking form:
-  //   step 0 -> Closing/Opening Report [Previous month]  (Town + TO's Name + items)
-  //   step 1 -> Secondary Sale [Current month]           (same Town + TO's Name, items)
-  //   step 2 -> Closing Stock [Current month]            (same Town + TO's Name, items)
-  // Each step keeps its own quantities in reportQtys[step]. Town + TO's
-  // Name are entered once on step 0 and stay locked for steps 1 and 2.
+  //   step 0 -> Closing/Opening Report [month BEFORE the admin's month]
+  //   step 1 -> Secondary Sale [admin's month]
+  //   step 2 -> Closing Stock [admin's month]
+  // then a results screen (reportReview) with Confirm / Cancel.
+  //
+  // The months, the ON/OFF switch and the list of TO's all come from the
+  // admin panel (reportConfig). The TO's Name is filled in automatically
+  // from the selected town (one TO per town) and can't be typed. A town
+  // that already filed for the current month is blocked with an Urdu message.
+  // Each step keeps its own quantities in reportQtys[step]; Town + TO stay
+  // locked for steps 1 and 2.
   const [reportMode, setReportMode] = useState(false);
   const [reportStep, setReportStep] = useState<0 | 1 | 2>(0);
   const [reportTownId, setReportTownId] = useState("");
@@ -290,6 +279,13 @@ export default function BookPage() {
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [reportDone, setReportDone] = useState(false);
+  const [reportConfig, setReportConfig] = useState<SecondaryReportConfig | null>(null);
+  const [reportTownFiled, setReportTownFiled] = useState(false);
+  const [reportReview, setReportReview] = useState(false);
+  const [showReportClosedModal, setShowReportClosedModal] = useState(false);
+  // Latest town id whose "already filed?" check was started — lets a slow
+  // response for a previously picked town be ignored.
+  const reportCheckRef = useRef("");
 
   // Read-only Pakistan Standard Time clock (not derived from the device's local time zone)
   const [pkTime, setPkTime] = useState(getPakistanTimeString());
@@ -432,6 +428,14 @@ export default function BookPage() {
       }
     }
     load();
+  }, []);
+
+  // Report config (ON/OFF, months, TO's). Loaded quietly on mount so the
+  // "TO,s Secondary Ach. Report" button can be hidden while the admin has the
+  // page switched OFF; re-read every time the report is opened.
+  useEffect(() => {
+    fetchReportConfig();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Close the town dropdown when clicking outside it
@@ -588,12 +592,45 @@ export default function BookPage() {
 
   // ---- TO's Secondary Ach. Report handlers --------------------------------
 
-  function openReport() {
+  // One TO per town, from the admin's "TO's Names" list.
+  const toByTownId = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; town_id: string }>();
+    for (const t of reportConfig?.tos ?? []) map.set(t.town_id, t);
+    return map;
+  }, [reportConfig]);
+
+  // Only towns that actually have a TO can file the report.
+  const reportTowns = useMemo(() => towns.filter((t) => toByTownId.has(t.id)), [towns, toByTownId]);
+
+  async function fetchReportConfig(): Promise<SecondaryReportConfig | null> {
+    try {
+      const res = await fetch("/api/secondary-report/config", { cache: "no-store" });
+      if (!res.ok) return null;
+      const json = (await res.json()) as SecondaryReportConfig;
+      setReportConfig(json);
+      return json;
+    } catch {
+      return null;
+    }
+  }
+
+  async function openReport() {
     if (deviceTimeTampered) return;
+
+    // Always re-read the admin's ON/OFF switch + month at the moment of opening.
+    const cfg = await fetchReportConfig();
+    if (!cfg) {
+      setError("Couldn't load the report right now. Please check your connection and try again.");
+      return;
+    }
+    if (!cfg.enabled) {
+      setShowReportClosedModal(true);
+      return;
+    }
+
+    resetReport();
+    setError(null);
     setReportMode(true);
-    setReportStep(0);
-    setReportError(null);
-    setReportDone(false);
     if (typeof window !== "undefined") window.scrollTo({ top: 0 });
   }
 
@@ -608,6 +645,9 @@ export default function BookPage() {
     setReportError(null);
     setReportSubmitting(false);
     setReportDone(false);
+    setReportTownFiled(false);
+    setReportReview(false);
+    reportCheckRef.current = "";
   }
 
   function exitReport() {
@@ -621,21 +661,53 @@ export default function BookPage() {
     if (reportStep !== 0 || deviceTimeTampered) return;
     setReportTownQuery(value);
     setReportTownId("");
+    setReportToName("");
+    setReportTownFiled(false);
+    setReportError(null);
+    reportCheckRef.current = "";
     if (!value.trim()) {
       setReportTownSuggestions([]);
       setShowReportTownDropdown(false);
       return;
     }
-    const matches = towns.filter((t) => townMatches(t, value)).slice(0, 8);
+    const q = value.trim().toLowerCase();
+    const matches = reportTowns
+      .filter(
+        (t) =>
+          townMatches(t, value.trim()) || (toByTownId.get(t.id)?.name ?? "").toLowerCase().includes(q)
+      )
+      .slice(0, 8);
     setReportTownSuggestions(matches);
     setShowReportTownDropdown(true);
   }
 
-  function selectReportTown(t: Town) {
+  // Picking a town fills in its TO's Name and checks right away whether this
+  // town has already filed for the month the admin has open.
+  async function selectReportTown(t: Town) {
     if (reportStep !== 0 || deviceTimeTampered) return;
     setReportTownQuery(townLabel(t));
     setReportTownId(t.id);
+    setReportToName(toByTownId.get(t.id)?.name ?? "");
     setShowReportTownDropdown(false);
+    setReportTownFiled(false);
+    setReportError(null);
+    reportCheckRef.current = t.id;
+
+    try {
+      const res = await fetch(`/api/secondary-report/check?town_id=${encodeURIComponent(t.id)}`, {
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (reportCheckRef.current !== t.id) return; // a different town was picked meanwhile
+      if (res.ok && json.filed) {
+        setReportTownFiled(true);
+        setReportError(REPORT_ALREADY_FILED_MESSAGE);
+      } else if (res.ok && json.enabled === false) {
+        setReportError(REPORT_DISABLED_MESSAGE);
+      }
+    } catch {
+      // The server re-checks on submit, so a failed pre-check is harmless.
+    }
   }
 
   function updateReportQty(step: number, itemId: string, value: string) {
@@ -666,7 +738,11 @@ export default function BookPage() {
         return false;
       }
       if (!reportToName.trim()) {
-        setReportError("براہ کرم ٹی او کا نام درج کریں۔");
+        setReportError(REPORT_NO_TO_MESSAGE);
+        return false;
+      }
+      if (reportTownFiled) {
+        setReportError(REPORT_ALREADY_FILED_MESSAGE);
         return false;
       }
     }
@@ -694,11 +770,29 @@ export default function BookPage() {
     }
   }
 
-  async function submitReport() {
+  // "Submit" on the last page doesn't file anything yet — it opens the
+  // results screen, where the user chooses Confirm or Cancel.
+  function openReportReview() {
     setReportError(null);
     if (!validateReportStep(2)) return;
+    setReportReview(true);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+  }
 
-    const months = getReportMonthNames(nowCorrectedMs ?? Date.now());
+  // Cancel on the results screen: back to the last page with everything kept.
+  function cancelReportReview() {
+    setReportError(null);
+    setReportReview(false);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+  }
+
+  // Confirm on the results screen: this is the actual filing.
+  async function confirmReport() {
+    if (deviceTimeTampered) {
+      setReportError(DEVICE_TIME_WARNING_MESSAGE);
+      return;
+    }
+    setReportError(null);
     setReportSubmitting(true);
     try {
       const res = await fetch("/api/secondary-reports", {
@@ -706,19 +800,34 @@ export default function BookPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           town_id: reportTownId,
-          town: reportTownQuery.trim(),
-          to_name: reportToName.trim(),
-          previous_month: months.previous,
-          current_month: months.current,
           closing_opening: reportLinesForStep(0),
           secondary_sale: reportLinesForStep(1),
           closing_stock: reportLinesForStep(2),
         }),
       });
       if (!res.ok) {
-        const json = await res.json().catch(() => ({ error: "Failed to submit report" }));
+        const json = await res.json().catch(() => ({}));
+        if (json.code === "ALREADY_FILED") {
+          setReportTownFiled(true);
+          setReportReview(false);
+          setReportStep(0);
+          setReportError(REPORT_ALREADY_FILED_MESSAGE);
+          return;
+        }
+        if (json.code === "DISABLED") {
+          setReportReview(false);
+          setReportError(REPORT_DISABLED_MESSAGE);
+          return;
+        }
+        if (json.code === "NO_TO") {
+          setReportReview(false);
+          setReportStep(0);
+          setReportError(REPORT_NO_TO_MESSAGE);
+          return;
+        }
         throw new Error(json.error ?? "Failed to submit report");
       }
+      setReportReview(false);
       setReportDone(true);
       if (typeof window !== "undefined") window.scrollTo({ top: 0 });
     } catch (err: any) {
@@ -988,35 +1097,148 @@ export default function BookPage() {
   // month-end report, not a booking) — only the device-time-tamper guard
   // applies here.
   if (reportMode) {
-    const months = getReportMonthNames(nowCorrectedMs ?? Date.now());
+    const cfg = reportConfig;
+
+    // Shell shared by the small status screens (loading / closed / done)
+    const statusScreen = (content: React.ReactNode) => (
+      <div className={styles.page} style={{ overflowX: "hidden" }}>
+        <main className={styles.wrapper} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
+          <Header />
+          {content}
+        </main>
+        {deviceTimeTampered && <DeviceTimeWarningOverlay />}
+      </div>
+    );
+
+    if (!cfg) {
+      return statusScreen(
+        <div className={styles.stateCard}>
+          <div className={styles.spinner} />
+          Loading...
+        </div>
+      );
+    }
+
+    if (!cfg.enabled) {
+      return statusScreen(
+        <div className={styles.confirmCard}>
+          <p style={{ ...urduFont, fontSize: 15, color: "#d62828", textAlign: "center", lineHeight: 2, margin: "0 0 14px" }}>
+            {REPORT_DISABLED_MESSAGE}
+          </p>
+          <button className={styles.secondaryBtn} onClick={exitReport}>
+            Back to booking
+          </button>
+        </div>
+      );
+    }
+
+    const prevLabel = monthLabel(cfg.prev_month, cfg.prev_year);
+    const curLabel = monthLabel(cfg.month, cfg.year);
     const stepTitles = [
-      `Closing/Opening Report [${months.previous}]`,
-      `Secondary Sale [${months.current}]`,
-      `Closing Stock [${months.current}]`,
+      `Closing/Opening Report [${prevLabel}]`,
+      `Secondary Sale [${curLabel}]`,
+      `Closing Stock [${curLabel}]`,
     ];
     const fieldsLocked = reportStep > 0 || deviceTimeTampered;
     const lockedFieldStyle: React.CSSProperties = { background: "#f1f3f7", color: "#555", cursor: "not-allowed" };
 
     if (reportDone) {
-      return (
-        <div className={styles.page} style={{ overflowX: "hidden" }}>
-          <main className={styles.wrapper} style={{ maxWidth: 480, width: "100%", margin: "0 auto" }}>
-            <Header />
-            <div className={styles.confirmCard}>
-              <div className={styles.confirmIcon}>
-                <CheckIcon />
-              </div>
-              <h1 style={{ fontSize: 21, margin: "0 0 8px", color: "#0b2b5b" }}>Report submitted</h1>
-              <p style={{ fontSize: 15, color: "#555", margin: 0 }}>
-                {reportToName.trim()} — {reportTownQuery.trim()}
-              </p>
-              <button className={styles.secondaryBtn} onClick={exitReport}>
-                Back to booking
-              </button>
-            </div>
-          </main>
-          {deviceTimeTampered && <DeviceTimeWarningOverlay />}
+      return statusScreen(
+        <div className={styles.confirmCard}>
+          <div className={styles.confirmIcon}>
+            <CheckIcon />
+          </div>
+          <h1 style={{ fontSize: 21, margin: "0 0 8px", color: "#0b2b5b" }}>Report submitted</h1>
+          <p style={{ fontSize: 15, color: "#555", margin: 0 }}>
+            {reportToName.trim()} — {reportTownQuery.trim()}
+          </p>
+          <button className={styles.secondaryBtn} onClick={exitReport}>
+            Back to booking
+          </button>
         </div>
+      );
+    }
+
+    // ---- Results screen: Confirm / Cancel before anything is filed ----
+    if (reportReview) {
+      return statusScreen(
+        <>
+          <div
+            style={{
+              background: "#eef3fb",
+              border: "1px solid #cddaf0",
+              borderRadius: 8,
+              padding: "10px 12px",
+              marginBottom: 10,
+              fontSize: 15,
+              fontWeight: 700,
+              color: "#0b2b5b",
+              textAlign: "center",
+            }}
+          >
+            Report Summary
+          </div>
+
+          <p style={{ ...urduFont, fontSize: 13, color: "#555", textAlign: "right", lineHeight: 1.9, margin: "0 0 10px" }}>
+            براہ کرم رپورٹ چیک کر لیں۔ تصدیق کرنے کے بعد رپورٹ جمع ہو جائے گی اور دوبارہ جمع نہیں کروائی جا سکے گی۔
+          </p>
+
+          <div style={{ ...summaryCardStyle, marginTop: 0 }}>
+            <div style={reviewInfoRowStyle}>
+              <span style={reviewInfoLabelStyle}>Town</span>
+              <strong style={{ ...urduFont, color: "#0b2b5b" }}>{reportTownQuery.trim()}</strong>
+            </div>
+            <div style={reviewInfoRowStyle}>
+              <span style={reviewInfoLabelStyle}>TO&apos;s Name</span>
+              <strong style={{ ...urduFont, color: "#0b2b5b" }}>{reportToName.trim()}</strong>
+            </div>
+          </div>
+
+          {[0, 1, 2].map((step) => (
+            <ReportReviewSection key={step} title={stepTitles[step]} items={items} qtys={reportQtys[step] ?? {}} />
+          ))}
+
+          {reportError && (
+            <div
+              className={styles.errorBanner}
+              style={isUrduText(reportError) ? { ...urduFont, textAlign: "right", marginTop: 12 } : { marginTop: 12 }}
+            >
+              {reportError}
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+            <button
+              type="button"
+              onClick={confirmReport}
+              disabled={reportSubmitting || deviceTimeTampered}
+              className={styles.submitBtn}
+              style={{ width: "100%", display: "block", ...urduFont }}
+            >
+              {reportSubmitting ? "جمع ہو رہا ہے..." : "تصدیق کریں"}
+            </button>
+            <button
+              type="button"
+              onClick={cancelReportReview}
+              disabled={reportSubmitting}
+              style={{
+                width: "100%",
+                padding: "10px 0",
+                background: "none",
+                border: "1px solid #ccc",
+                borderRadius: 8,
+                cursor: "pointer",
+                color: "#666",
+                fontSize: 14,
+                ...urduFont,
+              }}
+            >
+              منسوخ کریں
+            </button>
+          </div>
+
+          <BrandFooter />
+        </>
       );
     }
 
@@ -1064,7 +1286,12 @@ export default function BookPage() {
                 <div style={{ position: "relative" }}>
                   <input
                     className={styles.select}
-                    style={{ width: "100%", ...urduFont, ...(fieldsLocked ? lockedFieldStyle : null) }}
+                    style={{
+                      width: "100%",
+                      ...urduFont,
+                      ...(fieldsLocked ? lockedFieldStyle : null),
+                      ...(reportTownFiled ? { borderColor: "#d62828" } : null),
+                    }}
                     placeholder="ٹاؤن تلاش کرنے کے لیے ٹائپ کریں..."
                     value={reportTownQuery}
                     onChange={(e) => handleReportTownChange(e.target.value)}
@@ -1081,26 +1308,37 @@ export default function BookPage() {
                       {reportTownSuggestions.map((t) => (
                         <li key={t.id} onClick={() => selectReportTown(t)} style={dropdownItemStyle}>
                           {townLabel(t)}
+                          <span style={{ ...urduFont, color: "#888", fontSize: 12 }}>
+                            {"  "}— {toByTownId.get(t.id)?.name}
+                          </span>
                         </li>
                       ))}
                     </ul>
                   )}
+                  {!fieldsLocked && showReportTownDropdown && reportTownSuggestions.length === 0 && reportTownQuery.trim() && (
+                    <ul style={dropdownStyle}>
+                      <li style={{ ...dropdownItemStyle, ...urduFont, color: "#888", cursor: "default" }}>
+                        کوئی ٹاؤن نہیں ملا۔
+                      </li>
+                    </ul>
+                  )}
                 </div>
+                {reportTownFiled && (
+                  <div style={{ fontSize: 12, color: "#d62828", marginTop: 4, lineHeight: 1.8, ...urduFont, textAlign: "right" }}>
+                    {REPORT_ALREADY_FILED_MESSAGE}
+                  </div>
+                )}
               </div>
 
               <div style={{ gridColumn: "1 / -1" }}>
                 <label className={styles.fieldLabel}>TO&apos;s Name</label>
                 <input
                   className={styles.select}
-                  style={{ width: "100%", ...urduFont, ...(fieldsLocked ? lockedFieldStyle : null) }}
-                  placeholder="ٹی او کا نام درج کریں..."
+                  style={{ width: "100%", ...urduFont, ...lockedFieldStyle }}
+                  placeholder="ٹاؤن منتخب کرنے پر ٹی او کا نام خود بخود آ جائے گا"
                   value={reportToName}
-                  onChange={(e) => {
-                    if (fieldsLocked) return;
-                    setReportToName(e.target.value);
-                  }}
-                  readOnly={fieldsLocked}
-                  aria-readonly={fieldsLocked}
+                  readOnly
+                  aria-readonly
                   autoComplete="off"
                 />
                 {reportStep > 0 && (
@@ -1151,7 +1389,13 @@ export default function BookPage() {
               <button
                 type="button"
                 onClick={reportNext}
-                disabled={loading || !!loadError || items.length === 0 || deviceTimeTampered}
+                disabled={
+                  loading ||
+                  !!loadError ||
+                  items.length === 0 ||
+                  deviceTimeTampered ||
+                  (reportStep === 0 && reportTownFiled)
+                }
                 className={styles.submitBtn}
                 style={{ width: "100%", display: "block", ...urduFont }}
               >
@@ -1160,12 +1404,12 @@ export default function BookPage() {
             ) : (
               <button
                 type="button"
-                onClick={submitReport}
-                disabled={reportSubmitting || loading || !!loadError || items.length === 0 || deviceTimeTampered}
+                onClick={openReportReview}
+                disabled={loading || !!loadError || items.length === 0 || deviceTimeTampered}
                 className={styles.submitBtn}
                 style={{ width: "100%", display: "block", ...urduFont }}
               >
-                {reportSubmitting ? "جمع ہو رہا ہے..." : "رپورٹ جمع کریں"}
+                رپورٹ جمع کریں
               </button>
             )}
 
@@ -1173,7 +1417,6 @@ export default function BookPage() {
               <button
                 type="button"
                 onClick={reportBack}
-                disabled={reportSubmitting}
                 style={{
                   width: "100%",
                   padding: "10px 0",
@@ -1271,14 +1514,19 @@ export default function BookPage() {
       <Header />
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <button
-          type="button"
-          onClick={openReport}
-          disabled={deviceTimeTampered}
-          style={{ ...editOrderButtonStyle, ...(deviceTimeTampered ? { opacity: 0.5, cursor: "not-allowed" } : null) }}
-        >
-          TO,s Secondary Ach. Report
-        </button>
+        {reportConfig && !reportConfig.enabled ? (
+          // Admin has switched the report page OFF — keep the layout, hide the button.
+          <span />
+        ) : (
+          <button
+            type="button"
+            onClick={openReport}
+            disabled={deviceTimeTampered}
+            style={{ ...editOrderButtonStyle, ...(deviceTimeTampered ? { opacity: 0.5, cursor: "not-allowed" } : null) }}
+          >
+            TO,s Secondary Ach. Report
+          </button>
+        )}
         <button
           type="button"
           onClick={() => !deviceTimeTampered && setShowEditSearch(true)}
@@ -1651,6 +1899,18 @@ export default function BookPage() {
           </div>
         </div>
       )}
+      {showReportClosedModal && (
+        <div style={modalOverlayStyle} onClick={() => setShowReportClosedModal(false)}>
+          <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
+            <p style={{ ...urduFont, fontSize: 15, color: "#d62828", margin: "0 0 16px", textAlign: "right", lineHeight: 1.7 }}>
+              {REPORT_DISABLED_MESSAGE}
+            </p>
+            <button type="button" onClick={() => setShowReportClosedModal(false)} style={qtyOptionButtonStyle}>
+              OK
+            </button>
+          </div>
+        </div>
+      )}
       {showWeightLimitModal && (
         <div style={modalOverlayStyle} onClick={() => setShowWeightLimitModal(false)}>
           <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
@@ -1802,6 +2062,66 @@ function ReportItemsTable({
           <span>G.Total Weight (Ton)</span>
           <strong>{grandTotalTon.toFixed(3)}</strong>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// One page of the report on the results screen: only the items that have a
+// quantity, with their weights and the page's total — read-only.
+function ReportReviewSection({
+  title,
+  items,
+  qtys,
+}: {
+  title: string;
+  items: Item[];
+  qtys: Record<string, string>;
+}) {
+  const rows = items
+    .map((item) => {
+      const qty = parseFloat(qtys[item.id] || "0") || 0;
+      return { item, qty, weight: qty * item.weight_kg, kind: getIconKind(item) };
+    })
+    .filter((r) => r.qty > 0);
+  const totalKg = rows.reduce((sum, r) => sum + r.weight, 0);
+
+  return (
+    <div style={{ ...summaryCardStyle, marginTop: 10 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#0b2b5b", marginBottom: 6 }}>{title}</div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, tableLayout: "fixed" }}>
+        <colgroup>
+          <col style={{ width: "56%" }} />
+          <col style={{ width: "16%" }} />
+          <col style={{ width: "28%" }} />
+        </colgroup>
+        <thead>
+          <tr style={{ color: "#666", fontSize: 11, textAlign: "left" }}>
+            <th style={{ padding: "4px 4px", fontWeight: 600 }}>Item</th>
+            <th style={{ padding: "4px 4px", fontWeight: 600, textAlign: "center" }}>Qty</th>
+            <th style={{ padding: "4px 4px", fontWeight: 600, textAlign: "right" }}>Weight</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ item, qty, weight, kind }) => (
+            <tr key={item.id} style={{ borderTop: "1px solid #e6e9ef" }}>
+              <td style={{ padding: "5px 4px", wordBreak: "break-word" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <ProductIcon kind={kind} />
+                  {item.name}
+                </span>
+              </td>
+              <td style={{ padding: "5px 4px", textAlign: "center", fontWeight: 700, color: "#0b2b5b" }}>{qty}</td>
+              <td style={{ padding: "5px 4px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                {weight.toFixed(2)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ ...summaryGrandTotalBarStyle, marginTop: 8 }}>
+        <span>Total Weight (Ton)</span>
+        <strong>{(totalKg / 1000).toFixed(3)}</strong>
       </div>
     </div>
   );
@@ -2212,4 +2532,19 @@ const summaryAmountBarStyle: React.CSSProperties = {
   borderRadius: 6,
   padding: "7px 8px",
   marginTop: 8,
+};
+
+const reviewInfoRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "baseline",
+  gap: 10,
+  padding: "4px 0",
+  fontSize: 14,
+};
+
+const reviewInfoLabelStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: "#666",
 };
