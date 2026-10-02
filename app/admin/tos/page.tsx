@@ -1,27 +1,33 @@
 // Destination: app/admin/tos/page.tsx
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Town, TOWithTown } from "@/lib/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Town, TOWithTowns } from "@/lib/types";
 import { TOS_EXCEL_HEADERS, TosImportPlan, planTosImport } from "@/lib/tosExcel";
 
 const NAVY = "#0b2b5b";
 const YELLOW = "#F6C90E";
 const RED = "#D62828";
 
-const emptyForm = { name: "", town_id: "" };
+type TownPatch = { name?: string; is_active?: boolean; town_ids?: string[] };
 
 export default function AdminTosPage() {
-  const [tos, setTos] = useState<TOWithTown[]>([]);
+  const [tos, setTos] = useState<TOWithTowns[]>([]);
   const [towns, setTowns] = useState<Town[]>([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
   const [excelStatus, setExcelStatus] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [pendingImport, setPendingImport] = useState<TosImportPlan | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // add form
+  const [newName, setNewName] = useState("");
+  const [newTownIds, setNewTownIds] = useState<string[]>([]);
+
+  // which picker is open: the add form ("new") or a TO's id
+  const [picker, setPicker] = useState<"new" | string | null>(null);
 
   async function loadAll() {
     setLoading(true);
@@ -36,9 +42,8 @@ export default function AdminTosPage() {
       if (!townsRes.ok) throw new Error(townsJson.error || "Failed to load towns");
       setTos(tosJson.tos ?? []);
       setTowns(townsJson.towns ?? []);
-      // drop selections that no longer exist
       setSelected((prev) => {
-        const ids = new Set<string>((tosJson.tos ?? []).map((t: TOWithTown) => t.id));
+        const ids = new Set<string>((tosJson.tos ?? []).map((t: TOWithTowns) => t.id));
         return new Set(Array.from(prev).filter((id) => ids.has(id)));
       });
     } catch (err: any) {
@@ -52,20 +57,36 @@ export default function AdminTosPage() {
     loadAll();
   }, []);
 
+  // town id -> the TO that already has it (a town can only have one TO)
+  const takenBy = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of tos) for (const town of t.towns) map.set(town.id, t.id);
+    return map;
+  }, [tos]);
+
+  // Towns a picker may offer: free ones, plus the ones this TO already has.
+  function optionsFor(toId: string | "new"): Town[] {
+    return towns.filter((t) => !takenBy.has(t.id) || (toId !== "new" && takenBy.get(t.id) === toId));
+  }
+
   async function addTo(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setExcelStatus(null);
 
-    if (!form.name.trim()) {
+    if (!newName.trim()) {
       setError("TO's name is required.");
+      return;
+    }
+    if (newTownIds.length === 0) {
+      setError("Select at least one town for this TO.");
       return;
     }
 
     const res = await fetch("/api/admin/tos", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: form.name, town_id: form.town_id || null }),
+      body: JSON.stringify({ name: newName, town_ids: newTownIds }),
     });
 
     if (!res.ok) {
@@ -74,11 +95,12 @@ export default function AdminTosPage() {
       return;
     }
 
-    setForm(emptyForm);
+    setNewName("");
+    setNewTownIds([]);
     loadAll();
   }
 
-  async function updateTo(id: string, patch: Partial<TOWithTown>) {
+  async function updateTo(id: string, patch: TownPatch) {
     setError(null);
     const res = await fetch(`/api/admin/tos/${id}`, {
       method: "PATCH",
@@ -93,7 +115,7 @@ export default function AdminTosPage() {
   }
 
   async function deleteTo(id: string) {
-    if (!confirm("Remove this TO? Reports already filed keep the TO's name regardless.")) return;
+    if (!confirm("Remove this TO? Its towns become free. Reports already filed keep the TO's name regardless.")) return;
     await fetch(`/api/admin/tos/${id}`, { method: "DELETE" });
     loadAll();
   }
@@ -101,7 +123,7 @@ export default function AdminTosPage() {
   async function deleteSelected() {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
-    if (!confirm(`Remove ${ids.length} selected TO${ids.length === 1 ? "" : "'s"}? Reports already filed keep the TO's name regardless.`)) return;
+    if (!confirm(`Remove ${ids.length} selected TO${ids.length === 1 ? "" : "'s"}? Their towns become free. Reports already filed keep the TO's name regardless.`)) return;
     setError(null);
     const res = await fetch("/api/admin/tos/bulk", {
       method: "POST",
@@ -145,21 +167,21 @@ export default function AdminTosPage() {
 
   // ---------------------------------------------------------------- Excel
 
-  // Current TO's as an .xlsx. Edit it, add rows, put "Yes" in the Delete
-  // column of rows to remove, then upload it with "Update Data via Excel".
-  // Leave ID blank on a new row; leave Town blank for "all towns". A second
-  // sheet lists every valid town name.
+  // Current TO's as an .xlsx. Towns is one cell with the TO's towns separated
+  // by commas. Edit it, add rows (leave ID blank), put "Yes" in Delete to
+  // remove a row, then upload it with "Update Data via Excel". A second sheet
+  // lists every valid town name.
   async function downloadTemplate() {
     const XLSX = await import("xlsx");
     const rows = tos.map((t) => ({
       ID: t.id,
       "TO's Name": t.name,
-      Town: t.town_name ?? "",
+      Towns: t.towns.map((x) => x.name).join(", "),
       Status: t.is_active ? "Active" : "Inactive",
       Delete: "",
     }));
     const sheet = XLSX.utils.json_to_sheet(rows, { header: [...TOS_EXCEL_HEADERS] });
-    sheet["!cols"] = [{ wch: 38 }, { wch: 26 }, { wch: 26 }, { wch: 10 }, { wch: 8 }];
+    sheet["!cols"] = [{ wch: 38 }, { wch: 26 }, { wch: 60 }, { wch: 10 }, { wch: 8 }];
     const townSheet = XLSX.utils.json_to_sheet(
       towns.map((t) => ({ "Town List": t.name })),
       { header: ["Town List"] }
@@ -193,7 +215,7 @@ export default function AdminTosPage() {
 
       const plan = planTosImport(
         rows,
-        tos.map((t) => ({ id: t.id, name: t.name, town_id: t.town_id, is_active: t.is_active })),
+        tos.map((t) => ({ id: t.id, name: t.name, is_active: t.is_active, town_ids: t.towns.map((x) => x.id) })),
         towns.map((t) => ({ id: t.id, name: t.name }))
       );
 
@@ -218,7 +240,7 @@ export default function AdminTosPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          creates: pendingImport.creates.map((c) => ({ name: c.name, town_id: c.town_id, is_active: c.is_active })),
+          creates: pendingImport.creates.map((c) => ({ name: c.name, town_ids: c.town_ids, is_active: c.is_active })),
           patches: pendingImport.patches.map((p) => ({ id: p.id, patch: p.patch })),
           deletes: pendingImport.deletes.map((d) => d.id),
         }),
@@ -226,8 +248,7 @@ export default function AdminTosPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error ?? "Failed to apply changes");
 
-      const parts = [`Added ${json.created}`, `updated ${json.updated}`, `deleted ${json.deleted}`];
-      let msg = parts.join(", ") + ".";
+      let msg = `Added ${json.created}, updated ${json.updated}, deleted ${json.deleted}.`;
       if (pendingImport.issues.length > 0) msg += ` Skipped: ${pendingImport.issues.join(" · ")}`;
       if (json.failures?.length > 0) msg += ` Failed: ${json.failures.map((f: any) => `${f.what} (${f.error})`).join(" · ")}`;
       setExcelStatus(msg);
@@ -241,8 +262,11 @@ export default function AdminTosPage() {
     }
   }
 
+  const pickerTo = picker && picker !== "new" ? tos.find((t) => t.id === picker) ?? null : null;
+  const newTownNames = towns.filter((t) => newTownIds.includes(t.id)).map((t) => t.name);
+
   return (
-    <main style={{ maxWidth: 820, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif", background: "#fffdf5", minHeight: "100vh" }}>
+    <main style={{ maxWidth: 900, margin: "0 auto", padding: 24, fontFamily: "system-ui, sans-serif", background: "#fffdf5", minHeight: "100vh" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 6, height: 24, background: YELLOW, borderRadius: 3 }} />
@@ -285,15 +309,15 @@ export default function AdminTosPage() {
           boxShadow: "0 2px 8px rgba(11,43,91,0.06)",
         }}
       >
-        <input placeholder="TO's name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={inputStyle} />
-        <select value={form.town_id} onChange={(e) => setForm({ ...form, town_id: e.target.value })} style={inputStyle}>
-          <option value="">All towns</option>
-          {towns.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
+        <input placeholder="TO's name" value={newName} onChange={(e) => setNewName(e.target.value)} style={inputStyle} />
+        <button
+          type="button"
+          onClick={() => setPicker("new")}
+          title={newTownNames.join(", ")}
+          style={{ ...inputStyle, textAlign: "left", cursor: "pointer", color: newTownIds.length ? "#111" : "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+        >
+          {newTownIds.length === 0 ? "Select towns…" : newTownNames.join(", ")}
+        </button>
         <button type="submit" style={buttonStyle}>
           Add
         </button>
@@ -321,13 +345,13 @@ export default function AdminTosPage() {
         <p>Loading...</p>
       ) : tos.length === 0 ? null : (
         <div style={{ overflowX: "auto", border: `1px solid ${YELLOW}`, borderRadius: 10, background: "#fff" }}>
-          <table style={{ width: "100%", minWidth: 680, borderCollapse: "collapse" }}>
+          <table style={{ width: "100%", minWidth: 720, borderCollapse: "collapse" }}>
             <colgroup>
               <col style={{ width: 34 }} />
               <col style={{ width: 46 }} />
               <col style={{ width: 40 }} />
-              <col style={{ minWidth: 160 }} />
-              <col style={{ minWidth: 160 }} />
+              <col style={{ minWidth: 150 }} />
+              <col style={{ minWidth: 240 }} />
               <col style={{ width: 90 }} />
               <col style={{ width: 70 }} />
             </colgroup>
@@ -339,7 +363,7 @@ export default function AdminTosPage() {
                 <th style={thStyle}></th>
                 <th style={thStyle}>Sr#</th>
                 <th style={thStyle}>TO&apos;s Name</th>
-                <th style={thStyle}>Town</th>
+                <th style={thStyle}>Towns</th>
                 <th style={thStyle}>Status</th>
                 <th style={thStyle}></th>
               </tr>
@@ -363,24 +387,27 @@ export default function AdminTosPage() {
                         if (v && v !== to.name) updateTo(to.id, { name: v });
                         else e.target.value = to.name;
                       }}
-                      style={{ width: "100%", minWidth: 160, border: "1px solid transparent", padding: 4, boxSizing: "border-box", borderRadius: 4 }}
+                      style={{ width: "100%", minWidth: 150, border: "1px solid transparent", padding: 4, boxSizing: "border-box", borderRadius: 4 }}
                       onFocus={(e) => (e.currentTarget.style.borderColor = YELLOW)}
                       onBlurCapture={(e) => (e.currentTarget.style.borderColor = "transparent")}
                     />
                   </td>
                   <td style={tdStyle}>
-                    <select
-                      value={to.town_id ?? ""}
-                      onChange={(e) => (e.target.value || null) !== to.town_id && updateTo(to.id, { town_id: e.target.value || null })}
-                      style={{ width: "100%", minWidth: 160, border: "1px solid #e3e6ec", padding: 4, boxSizing: "border-box", borderRadius: 4, fontSize: 13, background: "#fff" }}
+                    <button
+                      type="button"
+                      onClick={() => setPicker(to.id)}
+                      title={to.towns.map((x) => x.name).join(", ")}
+                      style={{ ...inputStyle, textAlign: "left", cursor: "pointer", padding: "5px 8px", color: to.towns.length ? "#111" : "#b00", display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between" }}
                     >
-                      <option value="">All towns</option>
-                      {towns.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                        {to.towns.length === 0 ? "No towns" : to.towns.map((x) => x.name).join(", ")}
+                      </span>
+                      {to.towns.length > 0 && (
+                        <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, color: NAVY, background: "#eef3fb", borderRadius: 10, padding: "1px 8px" }}>
+                          {to.towns.length}
+                        </span>
+                      )}
+                    </button>
                   </td>
                   <td style={tdStyle}>
                     <button
@@ -412,6 +439,33 @@ export default function AdminTosPage() {
         </div>
       )}
 
+      {picker === "new" && (
+        <TownPickerModal
+          title="Select towns"
+          options={optionsFor("new")}
+          initial={newTownIds}
+          onCancel={() => setPicker(null)}
+          onSave={(ids) => {
+            setNewTownIds(ids);
+            setPicker(null);
+          }}
+        />
+      )}
+      {pickerTo && (
+        <TownPickerModal
+          title={`Towns — ${pickerTo.name}`}
+          options={optionsFor(pickerTo.id)}
+          initial={pickerTo.towns.map((x) => x.id)}
+          onCancel={() => setPicker(null)}
+          onSave={(ids) => {
+            const before = pickerTo.towns.map((x) => x.id).sort().join(",");
+            const after = [...ids].sort().join(",");
+            setPicker(null);
+            if (before !== after) updateTo(pickerTo.id, { town_ids: ids });
+          }}
+        />
+      )}
+
       {pendingImport && (
         <div style={modalOverlayStyle} onClick={() => !importing && setPendingImport(null)}>
           <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
@@ -422,7 +476,7 @@ export default function AdminTosPage() {
                 <PlanSection title={`Add (${pendingImport.creates.length})`} color="#1b8a3d" bg="#e6f4ea">
                   {pendingImport.creates.map((c, i) => (
                     <li key={i}>
-                      <strong>{c.name}</strong> — {c.townLabel}
+                      <strong>{c.name}</strong> — {c.townsLabel}
                       {!c.is_active && " (Inactive)"}
                     </li>
                   ))}
@@ -468,6 +522,106 @@ export default function AdminTosPage() {
   );
 }
 
+// Pick any number of towns. Only the towns passed in `options` are offered —
+// the page leaves out towns that already belong to another TO, so a town can
+// never be used twice.
+function TownPickerModal({
+  title,
+  options,
+  initial,
+  onSave,
+  onCancel,
+}: {
+  title: string;
+  options: Town[];
+  initial: string[];
+  onSave: (ids: string[]) => void;
+  onCancel: () => void;
+}) {
+  const [draft, setDraft] = useState<Set<string>>(new Set(initial));
+  const [query, setQuery] = useState("");
+
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? options.filter((t) => t.name.toLowerCase().includes(q)) : options;
+  }, [options, query]);
+
+  const allShownSelected = shown.length > 0 && shown.every((t) => draft.has(t.id));
+
+  function toggle(id: string) {
+    setDraft((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleShown() {
+    setDraft((prev) => {
+      const next = new Set(prev);
+      if (allShownSelected) shown.forEach((t) => next.delete(t.id));
+      else shown.forEach((t) => next.add(t.id));
+      return next;
+    });
+  }
+
+  return (
+    <div style={modalOverlayStyle} onClick={onCancel}>
+      <div style={{ ...modalBoxStyle, maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ fontSize: 17, margin: "0 0 10px", color: NAVY }}>{title}</h2>
+
+        <input
+          autoFocus
+          placeholder="Search towns"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ ...inputStyle, marginBottom: 8 }}
+        />
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "#666", margin: "0 0 6px" }}>
+          <span>
+            <strong style={{ color: NAVY }}>{draft.size}</strong> selected
+          </span>
+          <span style={{ display: "flex", gap: 12 }}>
+            <button type="button" onClick={toggleShown} style={linkButtonStyle} disabled={shown.length === 0}>
+              {allShownSelected ? "Unselect shown" : "Select shown"}
+            </button>
+            <button type="button" onClick={() => setDraft(new Set())} style={linkButtonStyle}>
+              Clear
+            </button>
+          </span>
+        </div>
+
+        <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, marginBottom: 14 }}>
+          {shown.length === 0 ? (
+            <div style={{ padding: 12, fontSize: 13, color: "#888" }}>—</div>
+          ) : (
+            shown.map((t) => (
+              <label
+                key={t.id}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 10px", fontSize: 13, cursor: "pointer", borderBottom: "1px solid #f4f4f4", background: draft.has(t.id) ? "#fff9e0" : undefined }}
+              >
+                <input type="checkbox" checked={draft.has(t.id)} onChange={() => toggle(t.id)} />
+                {t.name}
+              </label>
+            ))
+          )}
+        </div>
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button type="button" onClick={onCancel} style={secondaryButtonStyle}>
+            Cancel
+          </button>
+          <button type="button" onClick={() => onSave(options.filter((t) => draft.has(t.id)).map((t) => t.id))} style={buttonStyle}>
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PlanSection({ title, color, bg, children }: { title: string; color: string; bg: string; children: React.ReactNode }) {
   return (
     <div style={{ borderBottom: "1px solid #eee" }}>
@@ -508,6 +662,16 @@ const secondaryButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   fontWeight: 600,
   fontSize: 13,
+};
+
+const linkButtonStyle: React.CSSProperties = {
+  background: "none",
+  border: "none",
+  color: NAVY,
+  textDecoration: "underline",
+  cursor: "pointer",
+  fontSize: 12,
+  padding: 0,
 };
 
 const moveButtonStyle: React.CSSProperties = {

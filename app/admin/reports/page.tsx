@@ -2,7 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReportStage, SecondaryReport, SecondaryReportLine, SecondaryReportSettingsInfo, Town, TOWithTown } from "@/lib/types";
+import { ReportStage, SecondaryReport, SecondaryReportLine, SecondaryReportSettingsInfo, Town, TOWithTowns } from "@/lib/types";
 import { MONTH_NAMES, monthLabel } from "@/lib/secondaryReport";
 
 const NAVY = "#0b2b5b";
@@ -68,7 +68,7 @@ export default function AdminSecondaryReportsPage() {
   const [config, setConfig] = useState<SecondaryReportSettingsInfo | null>(null);
   const [towns, setTowns] = useState<Town[]>([]);
   const [reports, setReports] = useState<SecondaryReport[]>([]);
-  const [tos, setTos] = useState<TOWithTown[]>([]);
+  const [tos, setTos] = useState<TOWithTowns[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -182,18 +182,13 @@ export default function AdminSecondaryReportsPage() {
     );
   }, [reports, filterMonth, filterYear]);
 
-  // For a specific month + year: which towns can file but haven't yet.
-  // A town can file when it has an active TO of its own, or when there is an
-  // active "all towns" TO.
+  // For a specific month + year: which towns can file but haven't yet —
+  // the towns that belong to an active TO.
   const pendingTowns = useMemo(() => {
     if (filterMonth === "all" || filterYear === "all") return null;
     const filedTownIds = new Set(filtered.map((r) => r.town_id));
-    const activeTos = tos.filter((t) => t.is_active);
-    const hasAllTownsTo = activeTos.some((t) => t.town_id === null);
-    const townsWithTo = new Set(activeTos.filter((t) => t.town_id).map((t) => t.town_id));
-    return towns.filter(
-      (t) => t.is_active && (hasAllTownsTo || townsWithTo.has(t.id)) && !filedTownIds.has(t.id)
-    );
+    const townsWithTo = new Set(tos.filter((t) => t.is_active).flatMap((t) => t.towns.map((x) => x.id)));
+    return towns.filter((t) => t.is_active && townsWithTo.has(t.id) && !filedTownIds.has(t.id));
   }, [filtered, tos, towns, filterMonth, filterYear]);
 
   async function downloadExcel() {

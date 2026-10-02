@@ -32,28 +32,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "town_id is required" }, { status: 400 });
   }
 
-  // The town + the TO's that can file for it (added to this town, or to
-  // "all towns"). If the town has more than one, the browser sends to_id.
+  // The town and its TO.
   const { data: town } = await supabaseServer.from("towns").select("id, name").eq("id", townId).maybeSingle();
   if (!town) {
     return NextResponse.json({ error: "Unknown town." }, { status: 400 });
   }
 
-  const { data: candidates } = await supabaseServer
-    .from("tos")
-    .select("id, name, town_id")
-    .eq("is_active", true)
-    .or(`town_id.eq.${townId},town_id.is.null`);
+  // A town has at most one TO (to_towns.town_id is unique) and it must be active.
+  const { data: link } = await supabaseServer
+    .from("to_towns")
+    .select("to_id, tos!inner(id, name, is_active)")
+    .eq("town_id", townId)
+    .eq("tos.is_active", true)
+    .maybeSingle();
 
-  const list = candidates ?? [];
-  if (list.length === 0) {
-    return NextResponse.json({ error: "No TO is assigned to this town.", code: "NO_TO" }, { status: 400 });
-  }
-
-  const wantedToId = body.to_id ? String(body.to_id) : "";
-  const to = wantedToId ? list.find((t: any) => t.id === wantedToId) : list.length === 1 ? list[0] : undefined;
+  const to = link ? { id: (link as any).tos.id as string, name: (link as any).tos.name as string } : null;
   if (!to) {
-    return NextResponse.json({ error: "Please select the TO.", code: "NO_TO" }, { status: 400 });
+    return NextResponse.json({ error: "No TO is assigned to this town.", code: "NO_TO" }, { status: 400 });
   }
   const townName = town.name;
 

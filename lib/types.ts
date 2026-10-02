@@ -92,22 +92,20 @@ export interface NewOrderInput {
 // TO's Secondary Ach. Report
 // ---------------------------------------------------------------------------
 
-// A TO (territory officer). town_id = null means the TO works for every town;
-// otherwise the TO is added to that one town. The same TO name can appear on
-// many towns, and a town can have several TOs.
+// A TO (territory officer). A TO can have many towns; a town belongs to only
+// one TO (enforced by the to_towns table).
 export interface TO {
   id: string;
   name: string;
-  town_id: string | null;
   sort_order: number;
   is_active: boolean;
   created_at: string;
   updated_at: string;
 }
 
-// TO row as returned by /api/admin/tos (town name joined in).
-export interface TOWithTown extends TO {
-  town_name: string | null;
+// TO row as returned by /api/admin/tos (its towns joined in).
+export interface TOWithTowns extends TO {
+  towns: { id: string; name: string }[];
 }
 
 export type ReportStage = "closing_opening" | "secondary_sale" | "closing_stock";
@@ -150,5 +148,5 @@ export interface SecondaryReportSettingsInfo {
 
 // What the public /book page reads from /api/secondary-report/config
 export interface SecondaryReportConfig extends SecondaryReportSettingsInfo {
-  tos: { id: string; name: string; town_id: string | null }[]; // active TOs only
+  tos: { id: string; name: string; town_id: string }[]; // one entry per (active TO, town)
 }

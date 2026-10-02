@@ -1,12 +1,14 @@
 // Destination: app/api/admin/tos/[id]/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase";
+import { addTownsToTo, cleanTownIds, conflictMessage, findTownConflicts, removeTownsFromTo } from "@/lib/tosServer";
 
 interface Params {
   params: { id: string };
 }
 
-// PATCH /api/admin/tos/:id — update name / town_id (null = all towns) / is_active / sort_order
+// PATCH /api/admin/tos/:id — update name / is_active / sort_order and/or the
+// TO's full list of towns (town_ids replaces the current list).
 export async function PATCH(req: NextRequest, { params }: Params) {
   const body = await req.json();
 
@@ -17,28 +19,43 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     }
     patch.name = String(body.name).trim();
   }
-  if (body.town_id !== undefined) patch.town_id = body.town_id || null;
   if (body.is_active !== undefined) patch.is_active = !!body.is_active;
   if (body.sort_order !== undefined) patch.sort_order = body.sort_order;
 
-  if (Object.keys(patch).length === 0) {
+  const hasTowns = body.town_ids !== undefined;
+  if (Object.keys(patch).length === 0 && !hasTowns) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
-  const { data, error } = await supabaseServer.from("tos").update(patch).eq("id", params.id).select().single();
-
-  if (error) {
-    if (error.code === "23505") {
-      return NextResponse.json({ error: "This TO is already added for that town." }, { status: 409 });
+  try {
+    if (hasTowns) {
+      const townIds = cleanTownIds(body.town_ids);
+      const conflicts = await findTownConflicts(townIds, params.id);
+      if (conflicts.length > 0) {
+        return NextResponse.json({ error: conflictMessage(conflicts) }, { status: 409 });
+      }
+      await removeTownsFromTo(params.id, townIds);
+      await addTownsToTo(params.id, townIds);
     }
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
 
-  return NextResponse.json({ to: data });
+    if (Object.keys(patch).length > 0) {
+      const { error } = await supabaseServer.from("tos").update(patch).eq("id", params.id);
+      if (error) {
+        if (error.code === "23505") {
+          return NextResponse.json({ error: "A TO with this name already exists." }, { status: 409 });
+        }
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
 }
 
-// DELETE /api/admin/tos/:id — filed reports keep their TO name snapshot;
-// only the live link (to_id) is cleared.
+// DELETE /api/admin/tos/:id — its towns are freed; filed reports keep the
+// TO's name snapshot, only the live link (to_id) is cleared.
 export async function DELETE(_req: NextRequest, { params }: Params) {
   const { error } = await supabaseServer.from("tos").delete().eq("id", params.id);
 

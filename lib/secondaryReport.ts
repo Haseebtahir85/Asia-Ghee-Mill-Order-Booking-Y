@@ -58,8 +58,8 @@ export const REPORT_NO_TO_MESSAGE =
   "اس ٹاؤن کے لیے کوئی ٹی او مقرر نہیں ہے۔ براہ کرم سیلز ٹیم سے رابطہ کریں۔";
 export const REPORT_SELECT_TO_MESSAGE = "براہ کرم ٹی او منتخب کریں۔";
 
-// TO's that can file for a town: the ones added to that town plus the ones
-// added to "all towns" (town_id = null).
-export function tosForTown<T extends { town_id: string | null }>(tos: T[], townId: string): T[] {
-  return tos.filter((t) => t.town_id === townId || t.town_id === null);
+// The TO's that can file for a town. A town has at most one TO, so this is
+// either empty or a single entry.
+export function tosForTown<T extends { town_id: string }>(tos: T[], townId: string): T[] {
+  return tos.filter((t) => t.town_id === townId);
 }
