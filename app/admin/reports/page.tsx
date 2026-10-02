@@ -2,8 +2,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ReportStage, SecondaryReport, SecondaryReportConfig, SecondaryReportLine, TOWithTown } from "@/lib/types";
-import { MONTH_NAMES, SR_ENABLED_KEY, SR_MONTH_KEY, monthLabel } from "@/lib/secondaryReport";
+import { ReportStage, SecondaryReport, SecondaryReportLine, SecondaryReportSettingsInfo, Town, TOWithTown } from "@/lib/types";
+import { MONTH_NAMES, monthLabel } from "@/lib/secondaryReport";
 
 const NAVY = "#0b2b5b";
 const YELLOW = "#F6C90E";
@@ -65,7 +65,8 @@ function buildItemMatrix(report: SecondaryReport) {
 
 export default function AdminSecondaryReportsPage() {
   const [tab, setTab] = useState<Tab>("data");
-  const [config, setConfig] = useState<SecondaryReportConfig | null>(null);
+  const [config, setConfig] = useState<SecondaryReportSettingsInfo | null>(null);
+  const [towns, setTowns] = useState<Town[]>([]);
   const [reports, setReports] = useState<SecondaryReport[]>([]);
   const [tos, setTos] = useState<TOWithTown[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,26 +84,30 @@ export default function AdminSecondaryReportsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [cfgRes, repRes, tosRes] = await Promise.all([
-        fetch("/api/secondary-report/config", { cache: "no-store" }),
+      const [cfgRes, repRes, tosRes, townsRes] = await Promise.all([
+        fetch(`/api/admin/secondary-report-settings?t=${Date.now()}`, { cache: "no-store" }),
         fetch("/api/admin/secondary-reports", { cache: "no-store" }),
         fetch("/api/admin/tos", { cache: "no-store" }),
+        fetch("/api/admin/towns", { cache: "no-store" }),
       ]);
       const cfg = await cfgRes.json();
       const rep = await repRes.json();
       const tosJson = await tosRes.json();
+      const townsJson = await townsRes.json();
       if (!cfgRes.ok) throw new Error(cfg.error || "Failed to load settings");
       if (!repRes.ok) throw new Error(rep.error || "Failed to load reports");
       if (!tosRes.ok) throw new Error(tosJson.error || "Failed to load TO's");
-      setConfig(cfg);
+      if (!townsRes.ok) throw new Error(townsJson.error || "Failed to load towns");
+      setConfig(cfg.settings);
       setReports(rep.reports ?? []);
       setTos(tosJson.tos ?? []);
+      setTowns(townsJson.towns ?? []);
 
       // First load: start the Data tab on the period the admin has open.
       if (!filterInitialisedRef.current) {
         filterInitialisedRef.current = true;
-        setFilterMonth(String(cfg.month));
-        setFilterYear(String(cfg.year));
+        setFilterMonth(String(cfg.settings.month));
+        setFilterYear(String(cfg.settings.year));
       }
     } catch (err: any) {
       setError(err.message || "Failed to load data");
@@ -115,33 +120,29 @@ export default function AdminSecondaryReportsPage() {
     loadAll();
   }, [loadAll]);
 
-  async function saveSetting(key: string, value: string) {
+  // Saves ON/OFF and/or the month, then shows exactly what the server stored.
+  async function saveSettings(patch: { enabled?: boolean; selected_month?: number }) {
     setSaving(true);
     setError(null);
     setStatus(null);
     try {
-      const res = await fetch("/api/admin/settings", {
+      const res = await fetch("/api/admin/secondary-report-settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key, value }),
+        body: JSON.stringify(patch),
       });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json.error ?? "Failed to save setting");
-      }
-      // reload so the preview reflects the new period
-      const cfgRes = await fetch("/api/secondary-report/config", { cache: "no-store" });
-      const cfg = await cfgRes.json();
-      if (cfgRes.ok) {
-        setConfig(cfg);
-        if (key === SR_MONTH_KEY) {
-          setFilterMonth(String(cfg.month));
-          setFilterYear(String(cfg.year));
-        }
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error ?? "Failed to save settings");
+
+      const saved: SecondaryReportSettingsInfo = json.settings;
+      setConfig(saved);
+      if (patch.selected_month !== undefined) {
+        setFilterMonth(String(saved.month));
+        setFilterYear(String(saved.year));
       }
       setStatus("Saved.");
     } catch (err: any) {
-      setError(err.message || "Failed to save setting");
+      setError(err.message || "Failed to save settings");
     } finally {
       setSaving(false);
     }
@@ -181,12 +182,19 @@ export default function AdminSecondaryReportsPage() {
     );
   }, [reports, filterMonth, filterYear]);
 
-  // For a specific month + year: which active TO's towns haven't filed yet.
-  const pendingTos = useMemo(() => {
+  // For a specific month + year: which towns can file but haven't yet.
+  // A town can file when it has an active TO of its own, or when there is an
+  // active "all towns" TO.
+  const pendingTowns = useMemo(() => {
     if (filterMonth === "all" || filterYear === "all") return null;
     const filedTownIds = new Set(filtered.map((r) => r.town_id));
-    return tos.filter((t) => t.is_active && !filedTownIds.has(t.town_id));
-  }, [filtered, tos, filterMonth, filterYear]);
+    const activeTos = tos.filter((t) => t.is_active);
+    const hasAllTownsTo = activeTos.some((t) => t.town_id === null);
+    const townsWithTo = new Set(activeTos.filter((t) => t.town_id).map((t) => t.town_id));
+    return towns.filter(
+      (t) => t.is_active && (hasAllTownsTo || townsWithTo.has(t.id)) && !filedTownIds.has(t.id)
+    );
+  }, [filtered, tos, towns, filterMonth, filterYear]);
 
   async function downloadExcel() {
     const XLSX = await import("xlsx");
@@ -295,14 +303,10 @@ export default function AdminSecondaryReportsPage() {
           <div style={{ display: "grid", gap: 16, maxWidth: 640 }}>
             <section style={cardStyle}>
               <h2 style={cardTitleStyle}>Report page</h2>
-              <p style={helpStyle}>
-                When <strong>OFF</strong>, the <em>TO,s Secondary Ach. Report</em> button disappears from the booking
-                page and any submission is refused.
-              </p>
               <button
                 type="button"
                 disabled={saving}
-                onClick={() => saveSetting(SR_ENABLED_KEY, config.enabled ? "0" : "1")}
+                onClick={() => saveSettings({ enabled: !config.enabled })}
                 style={{
                   padding: "9px 22px",
                   fontSize: 14,
@@ -315,21 +319,17 @@ export default function AdminSecondaryReportsPage() {
                   opacity: saving ? 0.7 : 1,
                 }}
               >
-                {config.enabled ? "ON — click to turn OFF" : "OFF — click to turn ON"}
+                {saving ? "Saving..." : config.enabled ? "ON — click to turn OFF" : "OFF — click to turn ON"}
               </button>
             </section>
 
             <section style={cardStyle}>
               <h2 style={cardTitleStyle}>Report month</h2>
-              <p style={helpStyle}>
-                Pick the month TO&apos;s are reporting on. The year is automatic (the current year — a month still
-                ahead of today means last year&apos;s).
-              </p>
               <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
                 <select
                   value={config.selected_month}
                   disabled={saving}
-                  onChange={(e) => saveSetting(SR_MONTH_KEY, e.target.value)}
+                  onChange={(e) => saveSettings({ selected_month: parseInt(e.target.value, 10) })}
                   style={{ ...inputStyle, width: 180 }}
                 >
                   {MONTH_NAMES.map((name, i) => (
@@ -338,9 +338,7 @@ export default function AdminSecondaryReportsPage() {
                     </option>
                   ))}
                 </select>
-                <span style={{ fontSize: 14, color: NAVY, fontWeight: 700 }}>
-                  {config.year} <span style={{ fontWeight: 400, color: "#888", fontSize: 12 }}>(automatic)</span>
-                </span>
+                <span style={{ fontSize: 14, color: NAVY, fontWeight: 700 }}>{config.year}</span>
               </div>
 
               <div style={{ border: "1px solid #e6e9ef", borderRadius: 8, background: "#fafbfd", padding: "10px 12px", fontSize: 13, color: "#444", lineHeight: 1.9 }}>
@@ -354,10 +352,6 @@ export default function AdminSecondaryReportsPage() {
                   <strong>Page 3</strong> — Closing Stock <strong>[{monthLabel(config.month, config.year)}]</strong>
                 </div>
               </div>
-              <p style={{ ...helpStyle, marginTop: 10, marginBottom: 0 }}>
-                Changing the month starts a fresh round: each town can file once per month, so towns that filed for the
-                previous month can file again for the new one.
-              </p>
             </section>
           </div>
         )
@@ -401,10 +395,10 @@ export default function AdminSecondaryReportsPage() {
 
           <div style={{ fontSize: 13, color: "#555", marginBottom: 10 }}>
             <strong>{filtered.length}</strong> report{filtered.length === 1 ? "" : "s"} filed
-            {pendingTos && (
+            {pendingTowns && (
               <>
                 {" "}
-                · <strong>{pendingTos.length}</strong> not filed yet
+                · <strong>{pendingTowns.length}</strong> not filed yet
               </>
             )}
           </div>
@@ -459,16 +453,16 @@ export default function AdminSecondaryReportsPage() {
             </div>
           )}
 
-          {pendingTos && pendingTos.length > 0 && (
+          {pendingTowns && pendingTowns.length > 0 && (
             <section style={{ ...cardStyle, marginTop: 18 }}>
               <h2 style={cardTitleStyle}>Not filed yet ({monthLabel(parseInt(filterMonth, 10), parseInt(filterYear, 10))})</h2>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {pendingTos.map((t) => (
+                {pendingTowns.map((t) => (
                   <span
                     key={t.id}
                     style={{ fontSize: 12, background: "#fff4e0", color: "#8a4b00", border: "1px solid #f3dcae", borderRadius: 14, padding: "3px 10px" }}
                   >
-                    {t.town_name ?? "—"} · {t.name}
+                    {t.name}
                   </span>
                 ))}
               </div>
@@ -566,7 +560,6 @@ const cardStyle: React.CSSProperties = {
 };
 
 const cardTitleStyle: React.CSSProperties = { fontSize: 15, fontWeight: 700, color: NAVY, margin: "0 0 6px" };
-const helpStyle: React.CSSProperties = { fontSize: 13, color: "#666", margin: "0 0 12px", lineHeight: 1.6 };
 
 const inputStyle: React.CSSProperties = {
   minWidth: 0,

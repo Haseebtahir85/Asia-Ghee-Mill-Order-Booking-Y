@@ -23,28 +23,13 @@ export async function GET() {
   return NextResponse.json({ tos });
 }
 
-// POST /api/admin/tos — add a TO to a town. A town can only have ONE TO.
+// POST /api/admin/tos — add a TO. town_id is optional: leave it empty and
+// the TO works for every town.
 export async function POST(req: NextRequest) {
   const body = await req.json();
 
   if (!body.name || !String(body.name).trim()) {
     return NextResponse.json({ error: "TO's name is required" }, { status: 400 });
-  }
-  if (!body.town_id) {
-    return NextResponse.json({ error: "Please select a town" }, { status: 400 });
-  }
-
-  // Friendly pre-check (the unique constraint on tos.town_id is the real guard)
-  const { data: existing } = await supabaseServer
-    .from("tos")
-    .select("id, name")
-    .eq("town_id", body.town_id)
-    .maybeSingle();
-  if (existing) {
-    return NextResponse.json(
-      { error: `This town already has a TO assigned (${existing.name}). A town can only have one TO.` },
-      { status: 409 }
-    );
   }
 
   let sortOrder = body.sort_order;
@@ -62,7 +47,7 @@ export async function POST(req: NextRequest) {
     .from("tos")
     .insert({
       name: String(body.name).trim(),
-      town_id: body.town_id,
+      town_id: body.town_id || null,
       sort_order: sortOrder,
       is_active: body.is_active ?? true,
     })
@@ -70,10 +55,10 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error) {
-    const status = error.code === "23505" ? 409 : 500;
-    const message =
-      error.code === "23505" ? "This town already has a TO assigned. A town can only have one TO." : error.message;
-    return NextResponse.json({ error: message }, { status });
+    if (error.code === "23505") {
+      return NextResponse.json({ error: "This TO is already added for this town." }, { status: 409 });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   return NextResponse.json({ to: data }, { status: 201 });

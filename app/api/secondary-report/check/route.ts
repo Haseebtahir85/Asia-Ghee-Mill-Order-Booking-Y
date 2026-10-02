@@ -4,6 +4,8 @@ import { supabaseServer } from "@/lib/supabase";
 import { loadSecondaryReportSettings } from "@/lib/secondaryReportServer";
 
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+export const revalidate = 0;
 
 // GET /api/secondary-report/check?town_id=... — public. Has this town
 // already filed the report for the period the admin currently has open?

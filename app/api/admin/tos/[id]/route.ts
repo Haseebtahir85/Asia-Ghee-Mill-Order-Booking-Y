@@ -6,7 +6,7 @@ interface Params {
   params: { id: string };
 }
 
-// PATCH /api/admin/tos/:id — update name / town_id / is_active / sort_order
+// PATCH /api/admin/tos/:id — update name / town_id (null = all towns) / is_active / sort_order
 export async function PATCH(req: NextRequest, { params }: Params) {
   const body = await req.json();
 
@@ -17,7 +17,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     }
     patch.name = String(body.name).trim();
   }
-  if (body.town_id !== undefined) patch.town_id = body.town_id;
+  if (body.town_id !== undefined) patch.town_id = body.town_id || null;
   if (body.is_active !== undefined) patch.is_active = !!body.is_active;
   if (body.sort_order !== undefined) patch.sort_order = body.sort_order;
 
@@ -28,10 +28,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { data, error } = await supabaseServer.from("tos").update(patch).eq("id", params.id).select().single();
 
   if (error) {
-    const status = error.code === "23505" ? 409 : 500;
-    const message =
-      error.code === "23505" ? "That town already has a TO assigned. A town can only have one TO." : error.message;
-    return NextResponse.json({ error: message }, { status });
+    if (error.code === "23505") {
+      return NextResponse.json({ error: "This TO is already added for that town." }, { status: 409 });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   return NextResponse.json({ to: data });

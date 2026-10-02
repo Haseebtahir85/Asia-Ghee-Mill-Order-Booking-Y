@@ -17,10 +17,6 @@ export const MONTH_NAMES = [
   "December",
 ];
 
-// Keys used in the existing `settings` table.
-export const SR_ENABLED_KEY = "sr_enabled"; // "1" | "0"
-export const SR_MONTH_KEY = "sr_month"; // "1".."12"
-
 // Pakistan calendar month/year for a UTC timestamp (PKT is a fixed UTC+5).
 export function getPktMonthYear(ms: number): { month: number; year: number } {
   const d = new Date(ms + 5 * 60 * 60 * 1000);
@@ -55,7 +51,15 @@ export function monthLabel(month: number, year: number): string {
 // Urdu messages shown on the public /book page.
 export const REPORT_ALREADY_FILED_MESSAGE =
   "منتخب کردہ ٹاؤن کی رپورٹ پہلے ہی جمع کروائی جا چکی ہے۔ کسی بھی مسئلے کی صورت میں سیلز ٹیم سے رابطہ کریں۔";
+// Shown in the popup when the admin has switched the report page OFF.
 export const REPORT_DISABLED_MESSAGE =
-  "یہ رپورٹ فی الحال بند ہے۔ مزید معلومات کے لیے سیلز ٹیم سے رابطہ کریں۔";
+  "یہ رپورٹ فی الحال دستیاب نہیں ہے۔ براہ کرم کچھ دیر بعد کوشش کریں یا سیلز ٹیم آفس سے رابطہ کریں۔";
 export const REPORT_NO_TO_MESSAGE =
   "اس ٹاؤن کے لیے کوئی ٹی او مقرر نہیں ہے۔ براہ کرم سیلز ٹیم سے رابطہ کریں۔";
+export const REPORT_SELECT_TO_MESSAGE = "براہ کرم ٹی او منتخب کریں۔";
+
+// TO's that can file for a town: the ones added to that town plus the ones
+// added to "all towns" (town_id = null).
+export function tosForTown<T extends { town_id: string | null }>(tos: T[], townId: string): T[] {
+  return tos.filter((t) => t.town_id === townId || t.town_id === null);
+}

@@ -11,7 +11,7 @@ type IncomingLine = { item_id: string; qty: number };
 // POST /api/secondary-reports — public. File one TO's report (all 3 pages).
 // Everything that matters is decided HERE, not trusted from the browser:
 //   - the page must be switched ON in the admin settings
-//   - the TO's name comes from the town's TO record
+//   - the TO's name comes from the TO record (never typed by the visitor)
 //   - the month/year come from the admin's saved settings
 //   - a town can only file once per period
 export async function POST(req: NextRequest) {
@@ -28,22 +28,34 @@ export async function POST(req: NextRequest) {
   }
 
   const townId = String(body.town_id ?? "");
-  if (!townId) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(townId)) {
     return NextResponse.json({ error: "town_id is required" }, { status: 400 });
   }
 
-  // The town's TO (active only)
-  const { data: to } = await supabaseServer
-    .from("tos")
-    .select("id, name, town_id, towns(name)")
-    .eq("town_id", townId)
-    .eq("is_active", true)
-    .maybeSingle();
+  // The town + the TO's that can file for it (added to this town, or to
+  // "all towns"). If the town has more than one, the browser sends to_id.
+  const { data: town } = await supabaseServer.from("towns").select("id, name").eq("id", townId).maybeSingle();
+  if (!town) {
+    return NextResponse.json({ error: "Unknown town." }, { status: 400 });
+  }
 
-  if (!to) {
+  const { data: candidates } = await supabaseServer
+    .from("tos")
+    .select("id, name, town_id")
+    .eq("is_active", true)
+    .or(`town_id.eq.${townId},town_id.is.null`);
+
+  const list = candidates ?? [];
+  if (list.length === 0) {
     return NextResponse.json({ error: "No TO is assigned to this town.", code: "NO_TO" }, { status: 400 });
   }
-  const townName = (to as any).towns?.name ?? String(body.town ?? "");
+
+  const wantedToId = body.to_id ? String(body.to_id) : "";
+  const to = wantedToId ? list.find((t: any) => t.id === wantedToId) : list.length === 1 ? list[0] : undefined;
+  if (!to) {
+    return NextResponse.json({ error: "Please select the TO.", code: "NO_TO" }, { status: 400 });
+  }
+  const townName = town.name;
 
   // Already filed for this period?
   const { data: already } = await supabaseServer

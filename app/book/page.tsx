@@ -7,7 +7,9 @@ import {
   REPORT_ALREADY_FILED_MESSAGE,
   REPORT_DISABLED_MESSAGE,
   REPORT_NO_TO_MESSAGE,
+  REPORT_SELECT_TO_MESSAGE,
   monthLabel,
+  tosForTown,
 } from "@/lib/secondaryReport";
 import styles from "./book.module.css";
 
@@ -32,12 +34,6 @@ const WEIGHT_LIMIT_MESSAGE =
 // the town is fixed to whatever the order was booked with, and only the
 // item quantities can be changed.
 const TOWN_LOCKED_MESSAGE = "ترمیم کے دوران ٹاؤن تبدیل نہیں کیا جا سکتا۔";
-
-// Shown under the Town / TO's Name fields on steps 2 and 3 of the TO's
-// Secondary Ach. Report — those two fields are carried over from step 1.
-// (The TO's Name itself is never typed: it's filled in from the admin's
-// "TO's Names" list when the town is picked.)
-const REPORT_FIELDS_LOCKED_MESSAGE = "ٹاؤن اور ٹی او کا نام پہلے مرحلے سے لیا گیا ہے۔";
 
 // Shared with every device-time-tampering guard (town search, every input
 // field, the Book/Update button, the Edit Order search) as well as the
@@ -274,6 +270,7 @@ export default function BookPage() {
   const [reportTownSuggestions, setReportTownSuggestions] = useState<Town[]>([]);
   const [showReportTownDropdown, setShowReportTownDropdown] = useState(false);
   const reportTownBoxRef = useRef<HTMLDivElement>(null);
+  const [reportToId, setReportToId] = useState("");
   const [reportToName, setReportToName] = useState("");
   const [reportQtys, setReportQtys] = useState<Record<string, string>[]>([{}, {}, {}]);
   const [reportError, setReportError] = useState<string | null>(null);
@@ -592,15 +589,19 @@ export default function BookPage() {
 
   // ---- TO's Secondary Ach. Report handlers --------------------------------
 
-  // One TO per town, from the admin's "TO's Names" list.
-  const toByTownId = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; town_id: string }>();
-    for (const t of reportConfig?.tos ?? []) map.set(t.town_id, t);
-    return map;
-  }, [reportConfig]);
+  // Active TO's from the admin's "TO's Names" list. A TO added to "all
+  // towns" (town_id = null) can file for any town.
+  const toList = reportConfig?.tos ?? [];
 
-  // Only towns that actually have a TO can file the report.
-  const reportTowns = useMemo(() => towns.filter((t) => toByTownId.has(t.id)), [towns, toByTownId]);
+  // Towns that have at least one TO who can file for them.
+  const reportTowns = useMemo(() => {
+    const list = reportConfig?.tos ?? [];
+    const anyTown = list.some((t) => t.town_id === null);
+    return towns.filter((t) => anyTown || list.some((x) => x.town_id === t.id));
+  }, [towns, reportConfig]);
+
+  // The TO's the selected town can choose from (empty until a town is picked).
+  const reportCandidates = reportTownId ? tosForTown(toList, reportTownId) : [];
 
   async function fetchReportConfig(): Promise<SecondaryReportConfig | null> {
     try {
@@ -640,6 +641,7 @@ export default function BookPage() {
     setReportTownQuery("");
     setReportTownSuggestions([]);
     setShowReportTownDropdown(false);
+    setReportToId("");
     setReportToName("");
     setReportQtys([{}, {}, {}]);
     setReportError(null);
@@ -661,6 +663,7 @@ export default function BookPage() {
     if (reportStep !== 0 || deviceTimeTampered) return;
     setReportTownQuery(value);
     setReportTownId("");
+    setReportToId("");
     setReportToName("");
     setReportTownFiled(false);
     setReportError(null);
@@ -670,13 +673,7 @@ export default function BookPage() {
       setShowReportTownDropdown(false);
       return;
     }
-    const q = value.trim().toLowerCase();
-    const matches = reportTowns
-      .filter(
-        (t) =>
-          townMatches(t, value.trim()) || (toByTownId.get(t.id)?.name ?? "").toLowerCase().includes(q)
-      )
-      .slice(0, 8);
+    const matches = reportTowns.filter((t) => townMatches(t, value.trim())).slice(0, 8);
     setReportTownSuggestions(matches);
     setShowReportTownDropdown(true);
   }
@@ -687,7 +684,10 @@ export default function BookPage() {
     if (reportStep !== 0 || deviceTimeTampered) return;
     setReportTownQuery(townLabel(t));
     setReportTownId(t.id);
-    setReportToName(toByTownId.get(t.id)?.name ?? "");
+    // exactly one TO can file for this town -> fill it in; several -> the user picks
+    const options = tosForTown(toList, t.id);
+    setReportToId(options.length === 1 ? options[0].id : "");
+    setReportToName(options.length === 1 ? options[0].name : "");
     setShowReportTownDropdown(false);
     setReportTownFiled(false);
     setReportError(null);
@@ -708,6 +708,14 @@ export default function BookPage() {
     } catch {
       // The server re-checks on submit, so a failed pre-check is harmless.
     }
+  }
+
+  function selectReportTo(id: string) {
+    if (reportStep !== 0 || deviceTimeTampered) return;
+    const to = reportCandidates.find((t) => t.id === id);
+    setReportToId(to?.id ?? "");
+    setReportToName(to?.name ?? "");
+    setReportError(null);
   }
 
   function updateReportQty(step: number, itemId: string, value: string) {
@@ -737,8 +745,12 @@ export default function BookPage() {
         setReportError("براہ کرم ٹاؤن منتخب کریں۔");
         return false;
       }
-      if (!reportToName.trim()) {
+      if (reportCandidates.length === 0) {
         setReportError(REPORT_NO_TO_MESSAGE);
+        return false;
+      }
+      if (!reportToId) {
+        setReportError(REPORT_SELECT_TO_MESSAGE);
         return false;
       }
       if (reportTownFiled) {
@@ -800,6 +812,7 @@ export default function BookPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           town_id: reportTownId,
+          to_id: reportToId,
           closing_opening: reportLinesForStep(0),
           secondary_sale: reportLinesForStep(1),
           closing_stock: reportLinesForStep(2),
@@ -815,8 +828,10 @@ export default function BookPage() {
           return;
         }
         if (json.code === "DISABLED") {
-          setReportReview(false);
-          setReportError(REPORT_DISABLED_MESSAGE);
+          // Admin switched the page OFF while this was open: back to the
+          // booking page with the "not available right now" popup.
+          exitReport();
+          setShowReportClosedModal(true);
           return;
         }
         if (json.code === "NO_TO") {
@@ -1179,10 +1194,6 @@ export default function BookPage() {
             Report Summary
           </div>
 
-          <p style={{ ...urduFont, fontSize: 13, color: "#555", textAlign: "right", lineHeight: 1.9, margin: "0 0 10px" }}>
-            براہ کرم رپورٹ چیک کر لیں۔ تصدیق کرنے کے بعد رپورٹ جمع ہو جائے گی اور دوبارہ جمع نہیں کروائی جا سکے گی۔
-          </p>
-
           <div style={{ ...summaryCardStyle, marginTop: 0 }}>
             <div style={reviewInfoRowStyle}>
               <span style={reviewInfoLabelStyle}>Town</span>
@@ -1308,9 +1319,6 @@ export default function BookPage() {
                       {reportTownSuggestions.map((t) => (
                         <li key={t.id} onClick={() => selectReportTown(t)} style={dropdownItemStyle}>
                           {townLabel(t)}
-                          <span style={{ ...urduFont, color: "#888", fontSize: 12 }}>
-                            {"  "}— {toByTownId.get(t.id)?.name}
-                          </span>
                         </li>
                       ))}
                     </ul>
@@ -1332,19 +1340,29 @@ export default function BookPage() {
 
               <div style={{ gridColumn: "1 / -1" }}>
                 <label className={styles.fieldLabel}>TO&apos;s Name</label>
-                <input
-                  className={styles.select}
-                  style={{ width: "100%", ...urduFont, ...lockedFieldStyle }}
-                  placeholder="ٹاؤن منتخب کرنے پر ٹی او کا نام خود بخود آ جائے گا"
-                  value={reportToName}
-                  readOnly
-                  aria-readonly
-                  autoComplete="off"
-                />
-                {reportStep > 0 && (
-                  <div style={{ fontSize: 11, color: "#888", marginTop: 4, ...urduFont, textAlign: "right" }}>
-                    {REPORT_FIELDS_LOCKED_MESSAGE}
-                  </div>
+                {reportStep === 0 && !deviceTimeTampered && reportCandidates.length > 1 ? (
+                  <select
+                    className={styles.select}
+                    style={{ width: "100%", ...urduFont }}
+                    value={reportToId}
+                    onChange={(e) => selectReportTo(e.target.value)}
+                  >
+                    <option value="">ٹی او منتخب کریں</option>
+                    {reportCandidates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className={styles.select}
+                    style={{ width: "100%", ...urduFont, ...lockedFieldStyle }}
+                    value={reportToName}
+                    readOnly
+                    aria-readonly
+                    autoComplete="off"
+                  />
                 )}
               </div>
             </div>
@@ -1514,19 +1532,14 @@ export default function BookPage() {
       <Header />
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        {reportConfig && !reportConfig.enabled ? (
-          // Admin has switched the report page OFF — keep the layout, hide the button.
-          <span />
-        ) : (
-          <button
-            type="button"
-            onClick={openReport}
-            disabled={deviceTimeTampered}
-            style={{ ...editOrderButtonStyle, ...(deviceTimeTampered ? { opacity: 0.5, cursor: "not-allowed" } : null) }}
-          >
-            TO,s Secondary Ach. Report
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={openReport}
+          disabled={deviceTimeTampered}
+          style={{ ...editOrderButtonStyle, ...(deviceTimeTampered ? { opacity: 0.5, cursor: "not-allowed" } : null) }}
+        >
+          TO,s Secondary Ach. Report
+        </button>
         <button
           type="button"
           onClick={() => !deviceTimeTampered && setShowEditSearch(true)}
