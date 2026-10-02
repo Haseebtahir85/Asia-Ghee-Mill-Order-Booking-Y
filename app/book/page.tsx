@@ -1833,7 +1833,7 @@ export default function BookPage() {
       {deviceTimeTampered ? (
         <DeviceTimeWarningOverlay />
       ) : (
-        bookingClosed && <BookingClosedOverlay remainingMs={closedRemainingMs} />
+        bookingClosed && <BookingClosedOverlay remainingMs={closedRemainingMs} onOpenReport={openReport} opening={reportOpening} />
       )}
       </div>
     );
@@ -2230,7 +2230,7 @@ export default function BookPage() {
         </div>
       )}
       {reportLoadError && (
-        <div style={modalOverlayStyle} onClick={() => setReportLoadError(null)}>
+        <div style={{ ...modalOverlayStyle, zIndex: 10000 }} onClick={() => setReportLoadError(null)}>
           <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
             <p style={{ ...urduFont, fontSize: 15, color: "#d62828", margin: "0 0 10px", textAlign: "right", lineHeight: 1.7 }}>
               رپورٹ اس وقت نہیں کھل سکی۔ براہ کرم کچھ دیر بعد دوبارہ کوشش کریں یا سیلز ٹیم سے رابطہ کریں۔
@@ -2245,7 +2245,7 @@ export default function BookPage() {
         </div>
       )}
       {showReportClosedModal && (
-        <div style={modalOverlayStyle} onClick={() => setShowReportClosedModal(false)}>
+        <div style={{ ...modalOverlayStyle, zIndex: 10000 }} onClick={() => setShowReportClosedModal(false)}>
           <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
             <p style={{ ...urduFont, fontSize: 15, color: "#d62828", margin: "0 0 16px", textAlign: "right", lineHeight: 1.7 }}>
               {REPORT_DISABLED_MESSAGE}
@@ -2276,7 +2276,7 @@ export default function BookPage() {
     {deviceTimeTampered ? (
         <DeviceTimeWarningOverlay />
       ) : (
-        bookingClosed && <BookingClosedOverlay remainingMs={closedRemainingMs} />
+        bookingClosed && <BookingClosedOverlay remainingMs={closedRemainingMs} onOpenReport={openReport} opening={reportOpening} />
       )}
     </div>
   );
@@ -2647,7 +2647,15 @@ function AlertTriangleIcon() {
 // Full-screen popup shown outside 9am–6pm PKT. backdropFilter blurs the
 // booking form behind it (no need to touch the form's own styles), and it
 // has no dismiss handler — it can only go away once booking hours resume.
-function BookingClosedOverlay({ remainingMs }: { remainingMs: number }) {
+function BookingClosedOverlay({
+  remainingMs,
+  onOpenReport,
+  opening,
+}: {
+  remainingMs: number;
+  onOpenReport: () => void;
+  opening: boolean;
+}) {
   const { hours, minutes } = getRemainingHoursMinutes(remainingMs);
   return (
     <div style={closedOverlayStyle}>
@@ -2663,6 +2671,21 @@ function BookingClosedOverlay({ remainingMs }: { remainingMs: number }) {
           <br />
           شکریہ
         </p>
+        <div style={{ display: "flex", justifyContent: "center", margin: "0 0 18px" }}>
+          <button
+            type="button"
+            onClick={onOpenReport}
+            disabled={opening}
+            style={{
+              ...editOrderButtonStyle,
+              padding: "7px 18px",
+              fontSize: 13,
+              ...(opening ? { opacity: 0.6, cursor: "wait" } : null),
+            }}
+          >
+            TO,s Secondary Ach. Report
+          </button>
+        </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, paddingTop: 16, borderTop: "1px solid #e6e9ef" }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
