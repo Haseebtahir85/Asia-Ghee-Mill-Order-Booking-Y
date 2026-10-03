@@ -329,6 +329,9 @@ export default function BookPage() {
   // The click on "TO,s Secondary Ach. Report" first loads the admin's settings;
   // if that fails the reason is shown in a popup (never a silent no-op).
   const [reportOpening, setReportOpening] = useState(false);
+  // Popup shown whenever a town that has ALREADY filed is chosen or submitted again
+  // (null = hidden). The text is the Urdu "already filed — contact the sales team" message.
+  const [filedPopup, setFiledPopup] = useState<string | null>(null);
   const [reportLoadError, setReportLoadError] = useState<string | null>(null);
   // Latest town id whose "already filed?" check was started — lets a slow
   // response for a previously picked town be ignored.
@@ -732,6 +735,7 @@ export default function BookPage() {
     setReportTownFiled(false);
     setReportReview(false);
     setReportCheck(null);
+    setFiledPopup(null);
     reportCheckRef.current = "";
   }
 
@@ -811,8 +815,10 @@ export default function BookPage() {
 
     const pending = to.town_ids.filter((id) => !filedSet.has(id));
     if (to.town_ids.length === 0) setReportError(REPORT_TO_NO_TOWNS_MESSAGE);
-    else if (pending.length === 0) setReportError(REPORT_ALL_TOWNS_FILED_MESSAGE);
-    else setReportError(null);
+    else if (pending.length === 0) {
+      setReportError(REPORT_ALL_TOWNS_FILED_MESSAGE);
+      setFiledPopup(REPORT_ALL_TOWNS_FILED_MESSAGE);
+    } else setReportError(null);
 
     // exactly one town to file -> pick it for them
     if (pending.length === 1) {
@@ -880,6 +886,7 @@ export default function BookPage() {
     const alreadyFiled = filedSet.has(t.id);
     setReportTownFiled(alreadyFiled);
     setReportError(!owner ? REPORT_NO_TO_MESSAGE : alreadyFiled ? REPORT_ALREADY_FILED_MESSAGE : null);
+    if (alreadyFiled) setFiledPopup(REPORT_ALREADY_FILED_MESSAGE);
     reportCheckRef.current = t.id;
     if (!owner || alreadyFiled) return;
 
@@ -892,6 +899,7 @@ export default function BookPage() {
       if (res.ok && json.filed) {
         setReportTownFiled(true);
         setReportError(REPORT_ALREADY_FILED_MESSAGE);
+        setFiledPopup(REPORT_ALREADY_FILED_MESSAGE);
         setReportFiledIds((prev) => (prev.includes(t.id) ? prev : [...prev, t.id]));
       } else if (res.ok && json.enabled === false) {
         setReportError(REPORT_DISABLED_MESSAGE);
@@ -1038,6 +1046,8 @@ export default function BookPage() {
           setReportReview(false);
           setReportStep(0);
           setReportError(REPORT_ALREADY_FILED_MESSAGE);
+          setFiledPopup(REPORT_ALREADY_FILED_MESSAGE);
+          if (typeof window !== "undefined") window.scrollTo({ top: 0 });
           return;
         }
         if (json.code === "DISABLED") {
@@ -1607,8 +1617,8 @@ export default function BookPage() {
                         <button
                           key={t.id}
                           type="button"
-                          disabled={filed || deviceTimeTampered}
-                          onClick={() => selectReportTown(t, true)}
+                          disabled={deviceTimeTampered}
+                          onClick={() => (filed ? setFiledPopup(REPORT_ALREADY_FILED_MESSAGE) : selectReportTown(t, true))}
                           style={{
                             ...urduFont,
                             padding: "6px 14px",
@@ -1618,7 +1628,7 @@ export default function BookPage() {
                             borderColor: active ? "#0b2b5b" : filed ? "#bfe3c8" : "#cddaf0",
                             background: active ? "#0b2b5b" : filed ? "#e6f4ea" : "#fff",
                             color: active ? "#fff" : filed ? "#1b8a3d" : "#0b2b5b",
-                            cursor: filed || deviceTimeTampered ? "default" : "pointer",
+                            cursor: deviceTimeTampered ? "default" : "pointer",
                           }}
                         >
                           {filed ? "✓ " : ""}
@@ -1766,6 +1776,19 @@ export default function BookPage() {
           )}
 
           <BrandFooter />
+
+          {filedPopup && (
+            <div style={modalOverlayStyle} onClick={() => setFiledPopup(null)}>
+              <div style={modalBoxStyle} onClick={(e) => e.stopPropagation()}>
+                <p style={{ ...urduFont, fontSize: 15, color: "#d62828", margin: "0 0 16px", textAlign: "right", lineHeight: 1.9 }}>
+                  {filedPopup}
+                </p>
+                <button type="button" onClick={() => setFiledPopup(null)} style={qtyOptionButtonStyle}>
+                  OK
+                </button>
+              </div>
+            </div>
+          )}
         </main>
         {deviceTimeTampered && <DeviceTimeWarningOverlay />}
       </div>
